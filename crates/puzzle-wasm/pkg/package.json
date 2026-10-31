@@ -1,0 +1,17 @@
+{
+  "name": "puzzle-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings of puzzle-core for the web app",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "puzzle_wasm_bg.wasm",
+    "puzzle_wasm.js",
+    "puzzle_wasm.d.ts"
+  ],
+  "main": "puzzle_wasm.js",
+  "types": "puzzle_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

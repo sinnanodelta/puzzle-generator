@@ -1,6 +1,7 @@
 // The pieces of the document (SPEC §7.4): name, colour, view mode, isolation, the "must stay
 // notchable" flag, and the notchable / millable badges of the analysis. Ctrl- or Shift-clicking
-// selects several pieces, which the tools paint together.
+// selects several pieces, which the tools paint together; the "multi" box does it on touch screens.
+import { useState } from 'react';
 import { MAX_PIECES, newPiece } from '../core/doc';
 import { pickPiece } from '../actions';
 import { removePiece } from '../core/edit';
@@ -16,6 +17,7 @@ export function PieceList() {
   const viewModes = useStore((s) => s.viewModes);
   const isolate = useStore((s) => s.isolate);
   const analysis = useStore((s) => s.analysis);
+  const [multi, setMulti] = useState(false);
 
   const remove = (i: number) => {
     const p = doc.pieces[i];
@@ -27,6 +29,10 @@ export function PieceList() {
     <div className="piece-list">
       <div className="panel-header">
         <span>Pieces ({doc.pieces.length})</span>
+        <label className="check" title="Clicks add or remove pieces of the selection, like Ctrl-click">
+          <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} />
+          multi
+        </label>
         <button
           className="grow-left"
           disabled={doc.pieces.length >= MAX_PIECES}
@@ -51,7 +57,7 @@ export function PieceList() {
               key={p.id}
               className={i === current ? 'current' : paintedWith.includes(p.id) ? 'selected' : ''}
               title="Ctrl-click: paint several pieces at once; Shift-click: a range"
-              onClick={(e) => pickPiece(i, e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'only')}
+              onClick={(e) => pickPiece(i, multi || e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'only')}
             >
               <div className="piece-row">
                 <input

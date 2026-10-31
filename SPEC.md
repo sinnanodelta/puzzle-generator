@@ -346,10 +346,24 @@ puzzle_generator/
 
 ### 9.1 Development environment
 
-- WSL Debian 13, working on the Windows folder `/mnt/c/Users/adelas/Documents/Perso/playground/puzzle_generator`.
+- WSL Debian 13, working on the Windows folder `/mnt/c/Users/adelas/Documents/Perso/playground/puzzle-generator`.
 - Cargo's target directory is in the WSL home (`.cargo/config.toml` → `build.target-dir`), to avoid slow builds on `/mnt/c`.
 - Vite uses `server.watch.usePolling`, because files edited from Windows don't raise inotify events in WSL.
 - Node 20.19.2 (Debian package) meets Vite 8's minimum.
+
+### 9.2 Deployment (Vercel) and PWA
+
+- **Import from GitHub as is.** `vercel.json` at the root installs and builds in `web/` and serves `web/dist`; no project setting is needed. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
+- **Little traffic.** The built files in `assets/` have hashed names and are cached by browsers for a year. A service worker (`web/sw.js`, completed at build time with the list of built files) downloads each deployment once, then serves the app from its cache, offline too. A visit only fetches `sw.js` (~2 kB) to check for a new version, which takes over once every tab of the app is closed. Documents stay in the browser's storage: the server only serves static files.
+- **PWA.** `manifest.webmanifest` and the icons in `web/public` make the app installable ("Add to home screen").
+- **Touch.** One finger turns the 3D view, two fingers zoom and pan, and a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide, the panels stack in one scrolling column.
+
+### 9.2 Deployment (Vercel) and PWA
+
+- **Import from GitHub as is.**  at the root installs and builds in  and serves ; no project setting is needed. Vercel has no Rust, so the WASM package  is committed: after a change to the Rust code, run  and commit the package with .
+- **Little traffic.** The built files in  have hashed names and are cached by browsers for a year. A service worker (, completed at build time with the list of built files) downloads each deployment once and then serves the app from its cache, offline too; a visit only fetches  (~2 kB) to check for a new version, which takes over once every tab of the app is closed. Documents stay in the browser's storage: the server only serves static files.
+- **PWA.**  and the icons in  make the app installable ("Add to home screen").
+- **Touch.** One finger turns the 3D view and two fingers zoom and pan; a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide, the panels stack in one scrolling column.
 
 ---
 
