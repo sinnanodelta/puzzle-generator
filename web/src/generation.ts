@@ -4,8 +4,9 @@
 // leaderboard entries, best first (SPEC §4.4).
 import { toDoc } from './core/doc';
 import { getEntry, newEntryId, putEntry, type Uniqueness, uniquenessKey, uniquenessOf } from './core/library';
+import { rate } from './core/rating';
 import { renderThumbnail } from './core/thumbnail';
-import { type BoardEntry, type GenSettings, getState, notify, setState, type UniquenessCheck } from './store';
+import { type BoardEntry, type GenSettings, getState, notify, setState, type State, type UniquenessCheck } from './store';
 import type { GenEntry, PuzzleDoc, StepReport } from './types';
 import { defaultCheckStates, errorMessage } from './wasm';
 import type { AssembleRequest, AssembleResponse } from './workers/assemble.worker';
@@ -43,14 +44,38 @@ function kept(entries: BoardEntry[]): BoardEntry[] {
   });
 }
 
-/** The leaderboard shown: the best puzzles, or with `filledOnly` the best without holes. */
-export function shownBoard(board: BoardEntry[], filledOnly: boolean): BoardEntry[] {
-  return filledOnly ? board.filter((e) => e.holes === 0) : board.slice(0, BOARD_SIZE);
+export interface BoardView {
+  /** Only the puzzles without holes. */
+  filledOnly: boolean;
+  /** Only the best rated puzzle of each level. */
+  onePerLevel: boolean;
+  /** Sorted by rating, then by score. */
+  byRating: boolean;
 }
 
-/** Shows only the puzzles without holes, or all; the uniqueness checks follow the leaderboard shown. */
-export function setFilledOnly(filledOnly: boolean): void {
-  setState({ genFilledOnly: filledOnly });
+/** The leaderboard shown: the best puzzles, or with `filledOnly` the best without holes. */
+export function shownBoard(board: BoardEntry[], view: BoardView): BoardEntry[] {
+  let list = view.filledOnly ? board.filter((e) => e.holes === 0) : board.slice(0, BOARD_SIZE);
+  const rating = (e: BoardEntry) => rate(e.key, e.document).total;
+  if (view.byRating) list = [...list].sort((a, b) => rating(b) - rating(a) || better(a, b));
+  if (view.onePerLevel) {
+    const best = new Map<string, BoardEntry>();
+    for (const e of list) {
+      const b = best.get(e.level_string);
+      if (!b || rating(e) > rating(b)) best.set(e.level_string, e);
+    }
+    list = list.filter((e) => best.get(e.level_string) === e);
+  }
+  return list;
+}
+
+export function boardView(s: Pick<State, 'genFilledOnly' | 'genOnePerLevel' | 'genByRating'>, hasRequired: boolean): BoardView {
+  return { filledOnly: s.genFilledOnly && hasRequired, onePerLevel: s.genOnePerLevel, byRating: s.genByRating };
+}
+
+/** Changes the leaderboard filters; the uniqueness checks follow the leaderboard shown. */
+export function setBoardView(patch: Partial<Pick<State, 'genFilledOnly' | 'genOnePerLevel' | 'genByRating'>>): void {
+  setState(patch);
   pumpUniqueness();
 }
 
@@ -264,9 +289,10 @@ function finish(done: UniquenessJob, check: UniquenessCheck): void {
 
 /** Starts the uniqueness check of the best waiting leaderboard entry, shown ones first, unless one is running. */
 function pumpUniqueness(): void {
-  const { gen, genFilledOnly } = getState();
+  const s = getState();
+  const gen = s.gen;
   if (job || !gen || gen.base.target === null) return;
-  const order = [...shownBoard(gen.board, genFilledOnly), ...gen.board];
+  const order = [...shownBoard(gen.board, boardView(s, gen.base.target.required.length > 0)), ...gen.board];
   const entry = order.find((e) => !(e.key in gen.uniqueness));
   if (!entry) return;
   job = { id: ++lastJobId, base: gen.base, key: entry.key, doc: entry.document };

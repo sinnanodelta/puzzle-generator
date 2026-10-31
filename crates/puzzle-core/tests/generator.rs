@@ -246,7 +246,7 @@ fn keeps_the_best_puzzles_without_holes() {
 fn fill_target_finds_more_puzzles_without_holes() {
     let base = solid_template();
     let found = |fill_target: bool| -> usize {
-        (1..=3)
+        (1..=8)
             .map(|seed| {
                 let options = GeneratorOptions { seed, fill_target, ..GeneratorOptions::default() };
                 let mut generator = Generator::new(&base, options).unwrap();
@@ -276,4 +276,20 @@ fn pieces_grow_by_touching_cells() {
     // A cell that touches no piece is no candidate yet.
     let base = small(vec![piece("a", a, vec![[2, 0, 2]]), piece("b", vec![[2, 2, 2]], vec![])]);
     assert!(matches!(Generator::new(&base, options(1)).err(), Some(GeneratorError::NoCandidate)));
+}
+
+#[test]
+fn joins_split_pieces() {
+    // Piece a is in two parts that [1, 0, 0] joins, and piece b may take that cell first: the first
+    // pass ends with piece a in one part either way.
+    let base = small(vec![
+        piece("a", vec![[0, 0, 0], [2, 0, 0]], vec![[1, 0, 0]]),
+        piece("b", vec![[1, 1, 0]], vec![[1, 0, 0]]),
+    ]);
+    for seed in 1..=16 {
+        let mut generator = Generator::new(&base, options(seed)).unwrap();
+        while generator.step(1).passes == 0 {}
+        check_board(&base, &generator, false);
+        assert!(generator.board()[0].document.pieces[0].fixed.contains(&[1, 0, 0]), "seed {seed}");
+    }
 }

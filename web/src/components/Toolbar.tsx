@@ -2,8 +2,8 @@
 // block tool, moving the selection, undo and redo, and the grid size.
 import { useState } from 'react';
 import { clampGrid, paintedPieces } from '../actions';
-import { cellCoords, inGrid, resizeGrid, toCells, toDoc } from '../core/doc';
-import { AXIS_DIRS, blankToOptional, cubeTarget, gridCells, moveSelection, prefillTarget, type TargetKind } from '../core/edit';
+import { cellCoords, cropOffset, inGrid, resizeGrid, toCells, toDoc } from '../core/doc';
+import { AXIS_DIRS, blankToOptional, cubeTarget, gridCells, movePieces, moveSelection, prefillTarget, type TargetKind } from '../core/edit';
 import { editDoc, getState, notify, redo, setState, type Tool, undo, useStore } from '../store';
 import type { Vec3 } from '../types';
 import { burrTarget, errorMessage } from '../wasm';
@@ -31,6 +31,8 @@ export function Toolbar() {
   const targetKind = useStore((s) => s.targetKind);
   const showTarget = useStore((s) => s.showTarget);
   const showLayers = useStore((s) => s.showLayers);
+  const hideOptional = useStore((s) => s.hideOptional);
+  const pieceCount = useStore((s) => s.doc.pieces.length);
   const hoverPreview = useStore((s) => s.hoverPreview);
   const selection = useStore((s) => s.selection);
   const canUndo = useStore((s) => s.past.length > 0);
@@ -59,6 +61,13 @@ export function Toolbar() {
       out.selection = moved;
     });
     if (out.selection) setState({ selection: out.selection });
+  };
+
+  const movePiecesBy = (step: Vec3) => editDoc((d) => movePieces(d, paintedPieces(getState()), step));
+
+  const selectAllPieces = () => {
+    const { doc, current } = getState();
+    setState({ paintedWith: doc.pieces.filter((_, i) => i !== current).map((p) => p.id) });
   };
 
   const setBurrTarget = () => {
@@ -143,6 +152,19 @@ export function Toolbar() {
           )}
         </>
       )}
+      {pieceCount > 0 && (
+        <span className="segmented" title="Move the current piece and the selected ones by one cell">
+          <span className="dim">Move {painted > 1 ? `${painted} pieces` : 'piece'}</span>
+          {Object.entries(AXIS_DIRS).map(([name, step]) => (
+            <button key={name} onClick={() => movePiecesBy(step)}>
+              {name.toUpperCase()}
+            </button>
+          ))}
+          <button disabled={painted === pieceCount} onClick={selectAllPieces} title="Select every piece">
+            All
+          </button>
+        </span>
+      )}
       <label className="check">
         <input type="checkbox" checked={showTarget} onChange={(e) => setState({ showTarget: e.target.checked })} />
         show target
@@ -150,6 +172,10 @@ export function Toolbar() {
       <label className="check" title="The layer view beside the 3D view">
         <input type="checkbox" checked={showLayers} onChange={(e) => setState({ showLayers: e.target.checked })} />
         2D view
+      </label>
+      <label className="check" title="Hide the optional marks, to edit the fixed voxels">
+        <input type="checkbox" checked={hideOptional} onChange={(e) => setState({ hideOptional: e.target.checked })} />
+        hide optional
       </label>
       <label className="check" title="Hovering shows the voxel a click would add (hold Shift to hide it)">
         <input type="checkbox" checked={hoverPreview} onChange={(e) => setState({ hoverPreview: e.target.checked })} />
@@ -190,11 +216,14 @@ function GridSize({ grid }: { grid: Vec3 }) {
   const apply = () => {
     const g = size.map(clampGrid) as Vec3;
     const d = getState().doc;
-    const lost = [...d.pieces.flatMap((p) => [...p.fixed, ...p.optional])].filter((i) => !inGrid(g, cellCoords(d.grid, i))).length;
+    // A smaller grid keeps the part of the old one that holds most of the puzzle.
+    const offset = cropOffset(d, g);
+    const inside = (i: number) => inGrid(g, cellCoords(d.grid, i).map((c, k) => c - offset[k]) as Vec3);
+    const lost = d.pieces.flatMap((p) => [...p.fixed, ...p.optional]).filter((i) => !inside(i)).length;
     if (lost > 0 && !window.confirm(`${lost} voxel(s) fall outside the new grid and will be removed. Resize?`)) return;
     editDoc(
       (x) => {
-        Object.assign(x, resizeGrid(x, g));
+        Object.assign(x, resizeGrid(x, g, offset));
       },
       { selection: new Set() },
     );

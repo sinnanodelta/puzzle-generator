@@ -83,6 +83,7 @@ function Toast() {
 
 export function App() {
   const tab = useStore((s) => s.tab);
+  const headerOpen = useStore((s) => s.headerOpen);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -101,7 +102,7 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
+      <header className={headerOpen ? 'app-header open' : 'app-header'}>
         <span className="app-name">Puzzle Generator</span>
         <nav className="tabs">
           {TABS.map(([t, label]) => (
@@ -110,6 +111,11 @@ export function App() {
             </button>
           ))}
         </nav>
+        {tab === 'editor' && (
+          <button className="header-toggle" onClick={() => setState({ headerOpen: !headerOpen })} title="Name and Export">
+            {headerOpen ? '▴' : '▾'}
+          </button>
+        )}
         {tab === 'editor' && <DocTitle />}
       </header>
       <main className="app-main">

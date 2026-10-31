@@ -117,12 +117,53 @@ export function cloneDoc(d: EDoc): EDoc {
   };
 }
 
-/** The same document on a new grid; cells outside it are dropped. */
-export function resizeGrid(d: EDoc, grid: Vec3): EDoc {
+/**
+ * Where a smaller grid keeps most of the document: the corner of the new grid in the old one that
+ * drops the fewest fixed voxels, then the fewest optional marks, then the fewest target cells.
+ */
+export function cropOffset(d: EDoc, grid: Vec3): Vec3 {
+  const [X, Y, Z] = d.grid;
+  const n = grid.map((g, k) => Math.min(g, d.grid[k]));
+  const at = (x: number, y: number, z: number) => (z * (Y + 1) + y) * (X + 1) + x;
+  // The count of `cells` in each box of the new size, from 3D prefix sums.
+  const counter = (cells: Iterable<number>) => {
+    const s = new Float64Array((X + 1) * (Y + 1) * (Z + 1));
+    for (const i of cells) {
+      const [x, y, z] = cellCoords(d.grid, i);
+      s[at(x + 1, y + 1, z + 1)]++;
+    }
+    for (let z = 1; z <= Z; z++)
+      for (let y = 1; y <= Y; y++)
+        for (let x = 1; x <= X; x++)
+          s[at(x, y, z)] += s[at(x - 1, y, z)] + s[at(x, y - 1, z)] + s[at(x, y, z - 1)] - s[at(x - 1, y - 1, z)] - s[at(x - 1, y, z - 1)] - s[at(x, y - 1, z - 1)] + s[at(x - 1, y - 1, z - 1)];
+    return ([a, b, c]: Vec3) => {
+      const [e, f, g] = [a + n[0], b + n[1], c + n[2]];
+      return s[at(e, f, g)] - s[at(a, f, g)] - s[at(e, b, g)] - s[at(e, f, c)] + s[at(a, b, g)] + s[at(a, f, c)] + s[at(e, b, c)] - s[at(a, b, c)];
+    };
+  };
+  const counts = [
+    counter(d.pieces.flatMap((p) => [...p.fixed])),
+    counter(d.pieces.flatMap((p) => [...p.optional])),
+    counter(d.target ? [...d.target.required, ...d.target.variable] : []),
+  ];
+  let best: Vec3 = [0, 0, 0];
+  let kept = counts.map((c) => c(best));
+  for (let c = 0; c <= Z - n[2]; c++)
+    for (let b = 0; b <= Y - n[1]; b++)
+      for (let a = 0; a <= X - n[0]; a++) {
+        const k = counts.map((f) => f([a, b, c]));
+        const m = k.findIndex((v, i) => v !== kept[i]);
+        if (m >= 0 && k[m] > kept[m]) [best, kept] = [[a, b, c], k];
+      }
+  return best;
+}
+
+/** The same document on a new grid whose corner is at `offset` in the old one; cells outside it are dropped. */
+export function resizeGrid(d: EDoc, grid: Vec3, offset: Vec3 = [0, 0, 0]): EDoc {
   const move = (cells: Set<number>) => {
     const out = new Set<number>();
     for (const i of cells) {
-      const v = cellCoords(d.grid, i);
+      const v = cellCoords(d.grid, i).map((c, k) => c - offset[k]) as Vec3;
       if (inGrid(grid, v)) out.add(cellIndex(grid, v));
     }
     return out;

@@ -150,6 +150,29 @@ export function moveSelection(d: EDoc, selection: Set<number>, step: Vec3): Set<
   return new Set([...selection].map((i) => target.get(i)!));
 }
 
+/**
+ * Moves the pieces `ps` (fixed voxels and optional marks) by one cell, or returns an error message
+ * when a voxel would leave the grid or land on another piece's voxel. The moved voxels take their
+ * cells from the optional marks of the other pieces, and the moved marks give way to their voxels.
+ */
+export function movePieces(d: EDoc, ps: number[], step: Vec3): string | undefined {
+  const to = (i: number) => {
+    const v = cellCoords(d.grid, i);
+    const w: Vec3 = [v[0] + step[0], v[1] + step[1], v[2] + step[2]];
+    return inGrid(d.grid, w) ? cellIndex(d.grid, w) : -1;
+  };
+  const moved = ps.map((p) => ({ fixed: [...d.pieces[p].fixed].map(to), optional: [...d.pieces[p].optional].map(to) }));
+  if (moved.some((m) => m.fixed.includes(-1) || m.optional.includes(-1))) return 'The pieces would leave the grid';
+  const others = d.pieces.filter((_, i) => !ps.includes(i));
+  if (moved.some((m) => m.fixed.some((c) => others.some((q) => q.fixed.has(c))))) return 'The pieces would overlap another piece';
+  ps.forEach((p, k) => {
+    d.pieces[p].fixed = new Set(moved[k].fixed);
+    d.pieces[p].optional = new Set(moved[k].optional.filter((c) => !others.some((q) => q.fixed.has(c))));
+  });
+  for (const m of moved) for (const c of m.fixed) for (const q of others) q.optional.delete(c);
+  return undefined;
+}
+
 export interface BlockOptions {
   /** Width, height and length; the length runs along `axis`. */
   size: Vec3;

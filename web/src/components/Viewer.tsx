@@ -62,9 +62,10 @@ function Replayer({ doc, result }: { doc: PuzzleDoc; result: SolveResult }) {
     setP(c);
   };
 
+  // A new solution, or coming back to the tab (which mounts the replayer again), plays from the start.
   useEffect(() => {
     go(0);
-    setPlaying(false);
+    setPlaying(true);
     setFocus(null);
   }, [replay]);
 
@@ -118,8 +119,20 @@ function Replayer({ doc, result }: { doc: PuzzleDoc; result: SolveResult }) {
   const offsets = offsetsAt(replay, base, p - base);
   const active = Math.ceil(p) - 1;
   const activeStep = active >= 0 ? replay.steps[active] : null;
-  const center = replay.lo.map((l, k) => (l + replay.hi[k]) / 2) as Vec3;
-  const size = Math.max(...replay.hi.map((h, k) => h - replay.lo[k]));
+  // The camera frames the assembled puzzle, a little wider for the first moves.
+  const { center, size } = useMemo(() => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    doc.pieces.forEach((piece, i) => {
+      for (const v of piece.fixed) {
+        for (let a = 0; a < 3; a++) {
+          lo[a] = Math.min(lo[a], v[a] + replay.frames[0][i][a]);
+          hi[a] = Math.max(hi[a], v[a] + replay.frames[0][i][a] + 1);
+        }
+      }
+    });
+    return { center: lo.map((l, k) => (l + hi[k]) / 2) as Vec3, size: 1.2 * Math.max(...hi.map((h, k) => h - lo[k])) };
+  }, [doc, replay]);
 
   return (
     <div className="viewer">

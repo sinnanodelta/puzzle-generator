@@ -69,6 +69,7 @@ export function Scene3D() {
   const axis = useStore((s) => s.axis);
   const slice = useStore((s) => s.slice);
   const selection = useStore((s) => s.selection);
+  const hideOptional = useStore((s) => s.hideOptional);
   const preview = usePreview();
   const group = useRef<THREE.Group>(null);
   // The object under the pointer that set the hover cell: leaving another one keeps the cell.
@@ -192,7 +193,7 @@ export function Scene3D() {
               onHover={ghost ? undefined : (e) => hoverOn(`${piece.id}:fixed`, e, () => (e && pickFace(e)?.front) ?? null)}
             />
             <Markers
-              cells={optional}
+              cells={hideOptional ? [] : optional}
               size={0.42}
               color={piece.color}
               opacity={ghost ? 0.12 : 0.55}

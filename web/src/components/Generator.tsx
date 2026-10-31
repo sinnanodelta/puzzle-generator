@@ -2,7 +2,8 @@
 // rotatable view of the selected puzzle.
 import { useMemo } from 'react';
 import { toDoc } from '../core/doc';
-import { BOARD_SIZE, saveEntry, setFilledOnly, shownBoard, startGenerator, stopGenerator } from '../generation';
+import { rate } from '../core/rating';
+import { BOARD_SIZE, boardView, saveEntry, setBoardView, shownBoard, startGenerator, stopGenerator } from '../generation';
 import {
   type BoardEntry,
   confirmDiscard,
@@ -15,7 +16,7 @@ import {
   useStore,
   viewDoc,
 } from '../store';
-import type { PuzzleDoc, Vec3 } from '../types';
+import type { GenEntry, PuzzleDoc, Vec3 } from '../types';
 import { defaultCheckStates, errorMessage } from '../wasm';
 import { UniquenessBadge } from './UniquenessBadge';
 import { PieceMesh, Viewport } from './Viewport';
@@ -196,6 +197,12 @@ interface Row {
   rank: number;
 }
 
+function RatingCell({ entry }: { entry: GenEntry }) {
+  const r = rate(entry.key, entry.document);
+  const pct = (x: number) => `${Math.round(100 * x)}%`;
+  return <td title={`Balance of the piece sizes ${pct(r.balance)} · 3D printing without supports ${pct(r.print)}`}>{r.total}</td>;
+}
+
 function Leaderboard({
   rows,
   saved,
@@ -221,6 +228,7 @@ function Leaderboard({
           <th>#</th>
           <th>Level</th>
           <th>Moves</th>
+          <th title="0–100: half for balanced piece sizes, half for pieces easy to 3D print">Rating</th>
           {holes && <th title="Required cells of the target left empty">Holes</th>}
           <th>Found</th>
           {uniqueness && <th>Uniqueness</th>}
@@ -235,6 +243,7 @@ function Leaderboard({
               <strong>{entry.level_string}</strong>
             </td>
             <td>{entry.score.total_moves}</td>
+            <RatingCell entry={entry} />
             {holes && <td className={entry.holes > 0 ? 'holes' : 'dim'}>{entry.holes}</td>}
             <td className="dim">{duration(entry.found)}</td>
             {uniqueness && (
@@ -283,11 +292,14 @@ export function Generator() {
   const base = useMemo(() => gen?.base ?? toDoc(editorDoc), [gen?.base, editorDoc]);
   const uniqueOnly = useStore((s) => s.genUniqueOnly);
   const filledOnly = useStore((s) => s.genFilledOnly);
+  const onePerLevel = useStore((s) => s.genOnePerLevel);
+  const byRating = useStore((s) => s.genByRating);
   const board = gen?.board ?? [];
   const checked = base.target !== null;
   const hasRequired = (base.target?.required.length ?? 0) > 0;
-  const filtered = filledOnly && hasRequired;
-  const list = shownBoard(board, filtered);
+  const view = boardView({ genFilledOnly: filledOnly, genOnePerLevel: onePerLevel, genByRating: byRating }, hasRequired);
+  const filtered = view.filledOnly;
+  const list = shownBoard(board, view);
   const uniqueness = gen && checked ? gen.uniqueness : null;
   const done = uniqueness ? list.filter((e) => uniqueness[e.key]?.kind === 'done').length : 0;
   const rows = list
@@ -312,10 +324,18 @@ export function Generator() {
           <span className="gen-filters">
             {hasRequired && (
               <label className="check gen-filter" title="Shows only the puzzles that fill every required cell of the target, best first">
-                <input type="checkbox" checked={filledOnly} onChange={(e) => setFilledOnly(e.target.checked)} />
+                <input type="checkbox" checked={filledOnly} onChange={(e) => setBoardView({ genFilledOnly: e.target.checked })} />
                 Target filled only
               </label>
             )}
+            <label className="check gen-filter" title="Shows only the best rated puzzle of each level">
+              <input type="checkbox" checked={onePerLevel} onChange={(e) => setBoardView({ genOnePerLevel: e.target.checked })} />
+              One per level
+            </label>
+            <label className="check gen-filter" title="Sorts by rating: balanced piece sizes and pieces easy to 3D print">
+              <input type="checkbox" checked={byRating} onChange={(e) => setBoardView({ genByRating: e.target.checked })} />
+              Sort by rating
+            </label>
             {checked && (
               <label className="check gen-filter" title="Shows only the puzzles with exactly one assembly that comes apart">
                 <input type="checkbox" checked={uniqueOnly} onChange={(e) => setState({ genUniqueOnly: e.target.checked })} />

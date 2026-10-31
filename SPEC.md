@@ -212,6 +212,8 @@ Candidates are the `(cell, piece)` pairs where the cell is optional for that pie
 
 **Ranking.** Pass results compare the number of parts first, counting the face-connected parts beyond one per piece; fewer is better. So a result with a disconnected piece ranks below every connected result, whatever its level, and from a base in two parts the search moves towards connected results. Among results with the same number of parts, the score decides.
 
+**Joining split pieces.** At the end of a pass, each piece still in several parts (not notchable) gets a cheapest bridge from the part of its first voxel to another part, through cells optional for it: an empty cell costs 1, a voxel another piece added costs 2 (taken only if that piece doesn't split). The bridge stays when the puzzle is still solvable, and the piece is bridged again while it has several parts. Empty cells touching the piece were already rejected during the pass, so most bridges take cells from other pieces. On the solid burr test base, this nearly doubles the puzzles found without holes.
+
 **Holes.** The holes of a result are the *required* target cells (§5) that no piece fills. Without a target, a result has no holes. With **fill target first** enabled, holes come between the parts and the score: fewer is better. The search then heads for puzzles that fill the target, even at a lower level.
 
 **Settings.** Seed, check cap (default 100,000 states, lower than the editor's), `R` (default 3), `N` (default 30; 0 never restarts), worker count, time limit, target level and fill target first (default off; needs required target cells).
@@ -226,6 +228,7 @@ Candidates are the `(cell, piece)` pairs where the cell is optional for that pie
 
 - **Live leaderboard** of the 20 best distinct puzzles, deduplicated by `canonical_key`. Each entry shows its level string, total moves and uniqueness badge. Once a puzzle has holes, every entry also shows its number of holes.
 - The run also keeps the 20 best puzzles without holes, even when they rank lower. With required target cells, a **target filled only** filter shows those instead, best first. It can be switched at any time, and the uniqueness checks follow the list shown.
+- **Rating** (0–100) of each entry: half for balanced piece sizes (1 − the coefficient of variation of the voxel counts), half for 3D printing without supports (per piece, the share of voxels on the bed or on another voxel with the best face down, averaged). **One per level** keeps only the best rated entry of each level string; **sort by rating** orders the list by rating, then by score.
 - **Counters:** checks per second and the elapsed time; with required target cells, the best level without holes.
 - **Rotatable 3D view** of the current best puzzle.
 - Clicking an entry shows it and can replay it (viewer, §6). It can also be saved to the library.
@@ -267,7 +270,8 @@ Candidates are the `(cell, piece)` pairs where the cell is optional for that pie
 
 ## 6. Viewer
 
-- Plays back the full disassembly: play/pause, step forward and back, scrub bar, speed control. The first separation is highlighted.
+- Plays back the full disassembly: play/pause, step forward and back, scrub bar, speed control. The first separation is highlighted. Opening the tab (or a new solution) plays from the start.
+- The camera frames the assembled puzzle, slightly wider for the first moves.
 - Removed parts slide out a few cells, then are set aside so the remaining part stays readable.
 - Move list such as `#5  B+C → +X 2`, grouped by separation node. Clicking a move jumps to it.
 - Selecting a piece makes the other pieces transparent. This works in the viewer and in the editor.
@@ -294,6 +298,9 @@ Candidates are the `(cell, piece)` pairs where the cell is optional for that pie
   - Box fill and line fill.
   - Brush that turns fixed into optional and back.
   - Multi-voxel selection: move the selected voxels only, along ±X, ±Y, ±Z.
+  - Move pieces: ±X, ±Y, ±Z move the current piece and the selected ones (fixed voxels and optional marks) by one cell; *All* selects every piece. A move that leaves the grid or lands on another piece's voxel is refused; moved voxels take the cell from other pieces' optional marks.
+  - *Hide optional*: the optional marks are hidden in both views, to edit the fixed voxels.
+  - Grid size: a smaller grid keeps the box of the old grid that drops the fewest fixed voxels, then optional marks, then target cells, so a centred puzzle is cropped around it.
   - Stick/block tool: a W×H×L block at a given position and axis, for the current or a new piece, as fixed or optional.
   - Target painting (required/variable), "prefill target from puzzle", and "cube target": the whole grid, its outer faces required and the inside variable.
   - Undo and redo for every edit.
@@ -356,14 +363,7 @@ puzzle_generator/
 - **Import from GitHub as is.** Vercel reads `vercel.json` in the project's Root Directory: `vercel.json` at the repository root builds in `web/` and serves `web/dist`, and `web/vercel.json` does the same when the Root Directory is `web`. Both set the commands, so the dashboard's build settings don't matter. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
 - **Little traffic.** The built files in `assets/` have hashed names and are cached by browsers for a year. A service worker (`web/sw.js`, completed at build time with the list of built files) downloads each deployment once, then serves the app from its cache, offline too. A visit only fetches `sw.js` (~2 kB) to check for a new version, which takes over once every tab of the app is closed. Documents stay in the browser's storage: the server only serves static files.
 - **PWA.** `manifest.webmanifest` and the icons in `web/public` make the app installable ("Add to home screen").
-- **Touch.** One finger turns the 3D view, two fingers zoom and pan, and a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide, the panels stack in one scrolling column.
-
-### 9.2 Deployment (Vercel) and PWA
-
-- **Import from GitHub as is.**  at the root installs and builds in  and serves ; no project setting is needed. Vercel has no Rust, so the WASM package  is committed: after a change to the Rust code, run  and commit the package with .
-- **Little traffic.** The built files in  have hashed names and are cached by browsers for a year. A service worker (, completed at build time with the list of built files) downloads each deployment once and then serves the app from its cache, offline too; a visit only fetches  (~2 kB) to check for a new version, which takes over once every tab of the app is closed. Documents stay in the browser's storage: the server only serves static files.
-- **PWA.**  and the icons in  make the app installable ("Add to home screen").
-- **Touch.** One finger turns the 3D view and two fingers zoom and pan; a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide, the panels stack in one scrolling column.
+- **Touch.** One finger turns the 3D view, two fingers zoom and pan, and a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide the page never scrolls: the header folds to the tabs and Save (▾ shows the name and Export), the toolbar scrolls sideways, the pieces stay in a narrow left column beside the layer and 3D views, the status bar stays at the bottom, and long panels scroll inside.
 
 ---
 

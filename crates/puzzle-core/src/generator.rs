@@ -15,7 +15,10 @@
 //!
 //! Pass results compare the number of parts first: a puzzle with a piece in several parts cannot be
 //! made or recorded, so it ranks below every puzzle that can, whatever its level, and fewer parts
-//! lead the search towards one (a template base starts with pieces in two parts). With
+//! lead the search towards one (a template base starts with pieces in two parts). At the end of a
+//! pass, each piece still in several parts is joined, when the puzzle stays solvable, by a cheapest
+//! bridge of cells optional for it: empty cells, or voxels other pieces added if they don't split.
+//! With
 //! `fill_target`, the holes come next: required cells of the target that no piece fills. The
 //! leaderboard keeps the best puzzles, and also the best puzzles without holes, which may rank
 //! lower.
@@ -25,7 +28,7 @@
 //! the options and the seed, not on how it is cut into steps.
 
 use std::cmp::Reverse;
-use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt;
 use std::fmt::Write as _;
 
@@ -332,7 +335,8 @@ impl Generator {
                     self.next = Some(0);
                 }
                 Some(_) => {
-                    let state = std::mem::replace(&mut self.current, self.base.clone());
+                    let mut state = std::mem::replace(&mut self.current, self.base.clone());
+                    self.join_parts(&mut state);
                     self.end_pass(Some(state));
                 }
             }
@@ -514,6 +518,90 @@ impl Generator {
                 self.drop_unlinked(state, p);
             }
         }
+    }
+
+    /// Joins the parts of each split piece that is not notchable with a cheapest bridge of cells
+    /// optional for it (see `bridge`), taken from other pieces only when those do not split. A
+    /// bridge stays when the puzzle is still solvable.
+    fn join_parts(&mut self, state: &mut State) {
+        for p in 0..state.pieces.len() {
+            if self.notchable[p] {
+                continue;
+            }
+            while parts(&state.pieces[p]) > 1 {
+                let Some(bridge) = self.bridge(state, p) else {
+                    break;
+                };
+                let mut next = state.clone();
+                for &v in &bridge {
+                    let c = cell_index(self.grid, v);
+                    if next.owner[c] != FREE {
+                        next.pieces[next.owner[c] as usize].retain(|&w| w != v);
+                    }
+                    next.owner[c] = p as u8;
+                    next.pieces[p].push(v);
+                }
+                if (0..next.pieces.len()).any(|q| q != p && parts(&next.pieces[q]) > parts(&state.pieces[q])) {
+                    break;
+                }
+                let Some((score, level_string)) = self.check(&next.pieces) else {
+                    break;
+                };
+                (next.score, next.level_string) = (score, level_string);
+                *state = next;
+            }
+        }
+    }
+
+    /// The cells of a cheapest path, through cells optional for piece `p`, from the part of its
+    /// first voxel to another of its parts. An empty cell costs 1, and a voxel another piece added
+    /// costs 2 (base voxels are never optional for another piece). At the end of a pass, an empty
+    /// cell touching the piece was already rejected, so most bridges take voxels of other pieces.
+    fn bridge(&self, state: &State, p: usize) -> Option<Vec<Voxel>> {
+        let piece: HashSet<Voxel> = state.pieces[p].iter().copied().collect();
+        let mut part = vec![state.pieces[p][0]];
+        let mut in_part: HashSet<Voxel> = part.iter().copied().collect();
+        let mut k = 0;
+        while k < part.len() {
+            for n in self.neighbours(part[k]) {
+                if piece.contains(&n) && in_part.insert(n) {
+                    part.push(n);
+                }
+            }
+            k += 1;
+        }
+        // Dijkstra: the cost of each cell reached, and the cell it was reached from.
+        let mut best: HashMap<Voxel, (u32, Voxel)> = HashMap::new();
+        let mut heap: BinaryHeap<Reverse<(u32, Voxel)>> = part.iter().map(|&v| Reverse((0, v))).collect();
+        while let Some(Reverse((d, v))) = heap.pop() {
+            if best.get(&v).is_some_and(|&(e, _)| e < d) {
+                continue;
+            }
+            for n in self.neighbours(v) {
+                if in_part.contains(&n) {
+                    continue;
+                }
+                if piece.contains(&n) {
+                    let mut path = Vec::new();
+                    let mut w = v;
+                    while !in_part.contains(&w) {
+                        path.push(w);
+                        w = best[&w].1;
+                    }
+                    return Some(path);
+                }
+                let c = cell_index(self.grid, n);
+                if self.optional[c] >> p & 1 == 0 {
+                    continue;
+                }
+                let e = d + if state.owner[c] == FREE { 1 } else { 2 };
+                if best.get(&n).is_none_or(|&(f, _)| e < f) {
+                    best.insert(n, (e, v));
+                    heap.push(Reverse((e, n)));
+                }
+            }
+        }
+        None
     }
 
     /// Removes the voxels of piece `p` that no face-connected path within the piece links to one of

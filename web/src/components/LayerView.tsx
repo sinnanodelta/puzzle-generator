@@ -38,6 +38,7 @@ export function LayerView() {
   const tool = useStore((s) => s.tool);
   const showTarget = useStore((s) => s.showTarget);
   const selection = useStore((s) => s.selection);
+  const hideOptional = useStore((s) => s.hideOptional);
   const preview = usePreview();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -121,7 +122,7 @@ export function LayerView() {
             ctx.fillRect(x, y, cs, cs);
           }
         }
-        const optional = doc.pieces.flatMap((p, k) => (modes[k] !== 'hidden' && p.optional.has(i) ? [k] : []));
+        const optional = hideOptional ? [] : doc.pieces.flatMap((p, k) => (modes[k] !== 'hidden' && p.optional.has(i) ? [k] : []));
         if (optional.length > 0) {
           const k = optional[0];
           ctx.globalAlpha = modes[k] === 'ghost' ? 0.35 : 1;
@@ -202,7 +203,7 @@ export function LayerView() {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(px(h[pu]) + 1, py(h[pv]) + 1, cs - 2, cs - 2);
     }
-  }, [doc, axis, slice, viewModes, isolate, tool, showTarget, selection, preview, width, height, cs, tick]);
+  }, [doc, axis, slice, viewModes, isolate, tool, showTarget, selection, hideOptional, preview, width, height, cs, tick]);
 
   const cellAt = (e: ReactPointerEvent, clamp: boolean): Vec3 | null => {
     const r = canvasRef.current!.getBoundingClientRect();

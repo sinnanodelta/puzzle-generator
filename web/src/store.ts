@@ -97,6 +97,10 @@ export interface State {
   isolate: string | null;
   /** The layer view is shown beside the 3D view. */
   showLayers: boolean;
+  /** The optional marks are hidden in both views, to edit the fixed voxels. */
+  hideOptional: boolean;
+  /** The header shows the document name and its buttons (small screens fold it). */
+  headerOpen: boolean;
   /** Hovering shows the voxel a left click would add; holding Shift hides it. */
   hoverPreview: boolean;
   /** The cell a left click with the pencil would paint, under the pointer in either view. */
@@ -118,6 +122,10 @@ export interface State {
   genUniqueOnly: boolean;
   /** The leaderboard shows only the puzzles without holes in the target. */
   genFilledOnly: boolean;
+  /** The leaderboard shows only the best rated puzzle of each level. */
+  genOnePerLevel: boolean;
+  /** The leaderboard is sorted by rating. */
+  genByRating: boolean;
 }
 
 const HISTORY = 200;
@@ -140,6 +148,8 @@ let state: State = {
   viewModes: {},
   isolate: null,
   showLayers: true,
+  hideOptional: false,
+  headerOpen: false,
   hoverPreview: true,
   hoverCell: null,
   orientation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
@@ -163,6 +173,8 @@ let state: State = {
   genSelected: null,
   genUniqueOnly: false,
   genFilledOnly: false,
+  genOnePerLevel: false,
+  genByRating: false,
 };
 
 export function randomSeed(): number {
