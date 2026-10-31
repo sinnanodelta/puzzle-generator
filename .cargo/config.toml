@@ -1,0 +1,3 @@
+# Build artifacts live in the WSL home: building on /mnt/c is slow.
+[build]
+target-dir = "/home/adelas/.cargo-targets/puzzle_generator"

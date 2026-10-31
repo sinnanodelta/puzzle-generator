@@ -1,0 +1,20 @@
+[package]
+name = "puzzle-wasm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly bindings of puzzle-core for the web app"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+puzzle-core = { path = "../puzzle-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+wasm-bindgen = "0.2.129"
+
+[package.metadata.wasm-pack.profile.release]
+# Binaryen is not installed; wasm-pack would try to download it.
+wasm-opt = false

@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/puzzle-core", "crates/puzzle-wasm"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+[profile.dev]
+opt-level = 1

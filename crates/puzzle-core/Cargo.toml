@@ -1,0 +1,12 @@
+[package]
+name = "puzzle-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Voxel interlocking-puzzle model, solver and generator"
+
+[dependencies]
+flate2 = "1.1.10"
+roxmltree = "0.21.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
