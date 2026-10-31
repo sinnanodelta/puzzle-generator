@@ -353,7 +353,7 @@ puzzle_generator/
 
 ### 9.2 Deployment (Vercel) and PWA
 
-- **Import from GitHub as is.** `vercel.json` at the root installs and builds in `web/` and serves `web/dist`; no project setting is needed. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
+- **Import from GitHub as is.** Vercel reads `vercel.json` in the project's Root Directory: `vercel.json` at the repository root builds in `web/` and serves `web/dist`, and `web/vercel.json` does the same when the Root Directory is `web`. Both set the commands, so the dashboard's build settings don't matter. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
 - **Little traffic.** The built files in `assets/` have hashed names and are cached by browsers for a year. A service worker (`web/sw.js`, completed at build time with the list of built files) downloads each deployment once, then serves the app from its cache, offline too. A visit only fetches `sw.js` (~2 kB) to check for a new version, which takes over once every tab of the app is closed. Documents stay in the browser's storage: the server only serves static files.
 - **PWA.** `manifest.webmanifest` and the icons in `web/public` make the app installable ("Add to home screen").
 - **Touch.** One finger turns the 3D view, two fingers zoom and pan, and a tap clicks. With no right button, Alt or Ctrl, erasing uses the Eraser tool and several pieces are selected with the "multi" box of the piece list. Below 820 px wide, the panels stack in one scrolling column.
