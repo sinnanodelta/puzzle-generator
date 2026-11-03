@@ -16,7 +16,7 @@ pub mod stl;
 pub mod templates;
 pub mod xmpuzzle;
 
-pub use assembler::{AssembleOptions, AssembleResult, AssembleStatus, all_optional, assemble};
+pub use assembler::{AssembleOptions, AssembleResult, AssembleStatus, Fit, all_optional, assemble, fit_target};
 pub use canonical::canonical_key;
 pub use generator::{Entry, Generator, GeneratorError, GeneratorOptions, Score, StepReport};
 pub use model::{Document, DocumentError, ModelError, Puzzle, Voxel};

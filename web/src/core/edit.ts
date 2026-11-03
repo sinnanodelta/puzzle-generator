@@ -50,17 +50,6 @@ export function erase(d: EDoc, ps: number[], cell: number): void {
   for (const p of ps) d.pieces[p]?.optional.delete(cell);
 }
 
-/** Makes every blank cell of `cells` (no voxel, no optional mark) optional for every piece; returns how many. */
-export function blankToOptional(d: EDoc, cells: Iterable<number>): number {
-  let count = 0;
-  for (const c of cells) {
-    if (d.pieces.some((p) => p.fixed.has(c) || p.optional.has(c))) continue;
-    for (const p of d.pieces) p.optional.add(c);
-    count++;
-  }
-  return count;
-}
-
 /** Toggles a cell of piece `p` between fixed and optional (the brush). */
 export function toggleState(d: EDoc, p: number, cell: number): void {
   const piece = d.pieces[p];
@@ -152,8 +141,9 @@ export function moveSelection(d: EDoc, selection: Set<number>, step: Vec3): Set<
 
 /**
  * Moves the pieces `ps` (fixed voxels and optional marks) by one cell, or returns an error message
- * when a voxel would leave the grid or land on another piece's voxel. The moved voxels take their
- * cells from the optional marks of the other pieces, and the moved marks give way to their voxels.
+ * when a fixed voxel would leave the grid or land on another piece's voxel. Optional marks that
+ * would leave the grid are dropped. The moved voxels take their cells from the optional marks of
+ * the other pieces, and the moved marks give way to their voxels.
  */
 export function movePieces(d: EDoc, ps: number[], step: Vec3): string | undefined {
   const to = (i: number) => {
@@ -161,8 +151,11 @@ export function movePieces(d: EDoc, ps: number[], step: Vec3): string | undefine
     const w: Vec3 = [v[0] + step[0], v[1] + step[1], v[2] + step[2]];
     return inGrid(d.grid, w) ? cellIndex(d.grid, w) : -1;
   };
-  const moved = ps.map((p) => ({ fixed: [...d.pieces[p].fixed].map(to), optional: [...d.pieces[p].optional].map(to) }));
-  if (moved.some((m) => m.fixed.includes(-1) || m.optional.includes(-1))) return 'The pieces would leave the grid';
+  const moved = ps.map((p) => ({
+    fixed: [...d.pieces[p].fixed].map(to),
+    optional: [...d.pieces[p].optional].map(to).filter((c) => c >= 0),
+  }));
+  if (moved.some((m) => m.fixed.includes(-1))) return 'The pieces would leave the grid';
   const others = d.pieces.filter((_, i) => !ps.includes(i));
   if (moved.some((m) => m.fixed.some((c) => others.some((q) => q.fixed.has(c))))) return 'The pieces would overlap another piece';
   ps.forEach((p, k) => {
@@ -216,19 +209,60 @@ export function paintTarget(d: EDoc, cell: number, kind: TargetKind): void {
   if (kind !== 'erase') d.target[kind].add(cell);
 }
 
-/** Every fixed cell becomes a required target cell (SPEC §7.3). */
-export function prefillTarget(d: EDoc): void {
-  d.target = { required: new Set(d.pieces.flatMap((p) => [...p.fixed])), variable: new Set() };
+/** A zone of the grid: its outer cells (`required`) and its inside (`variable`), as for a target. */
+export interface Shape {
+  required: Set<number>;
+  variable: Set<number>;
 }
 
-/** The whole grid as the target: the cells on its outer faces are required, the inside variable. */
-export function cubeTarget(d: EDoc): void {
-  const target = { required: new Set<number>(), variable: new Set<number>() };
-  for (const i of gridCells(d.grid)) {
-    const v = cellCoords(d.grid, i);
-    (v.some((c, k) => c === 0 || c === d.grid[k] - 1) ? target.required : target.variable).add(i);
+/** The cells of `inside` with a neighbour outside are required, the others variable. */
+function shellShape(grid: Vec3, inside: (v: Vec3) => boolean): Shape {
+  const shape: Shape = { required: new Set(), variable: new Set() };
+  for (const i of gridCells(grid)) {
+    const v = cellCoords(grid, i);
+    if (!inside(v)) continue;
+    const outer = Object.values(AXIS_DIRS).some((s) => !inside([v[0] + s[0], v[1] + s[1], v[2] + s[2]]));
+    (outer ? shape.required : shape.variable).add(i);
   }
-  d.target = target;
+  return shape;
+}
+
+/** The whole grid: the cells of its outer faces required, the inside variable. */
+export function cubeShape(grid: Vec3): Shape {
+  return shellShape(grid, (v) => inGrid(grid, v));
+}
+
+/** The ellipsoid inscribed in the grid (a sphere in a cubic grid), by the centres of its cells. */
+export function sphereShape(grid: Vec3): Shape {
+  return shellShape(grid, (v) => inGrid(grid, v) && v.reduce((s, c, k) => s + ((c + 0.5 - grid[k] / 2) / (grid[k] / 2)) ** 2, 0) <= 1);
+}
+
+/**
+ * Marks the cells optional for the pieces `ps`, except the cells holding a fixed voxel; returns how
+ * many marks were added.
+ */
+export function fillOptional(d: EDoc, ps: number[], cells: Iterable<number>): number {
+  let count = 0;
+  for (const c of cells) {
+    const owner = d.pieces.findIndex((q) => q.fixed.has(c));
+    if (owner >= 0) continue;
+    for (const p of ps) {
+      if (d.pieces[p].optional.has(c)) continue;
+      d.pieces[p].optional.add(c);
+      count++;
+    }
+  }
+  return count;
+}
+
+/** Removes every optional mark of the pieces `ps`; returns how many. */
+export function clearOptional(d: EDoc, ps: number[]): number {
+  let count = 0;
+  for (const p of ps) {
+    count += d.pieces[p].optional.size;
+    d.pieces[p].optional.clear();
+  }
+  return count;
 }
 
 export function removePiece(d: EDoc, p: number): void {

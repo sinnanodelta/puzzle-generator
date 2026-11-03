@@ -6,6 +6,7 @@ import { Editor } from './components/Editor';
 import { ExportDialog } from './components/ExportDialog';
 import { Generator } from './components/Generator';
 import { Library } from './components/Library';
+import { PasswordDialog } from './components/PasswordDialog';
 import { Viewer } from './components/Viewer';
 import { toDoc } from './core/doc';
 import { editDoc, getState, notify, saveDoc, setState, type Tab, useStore } from './store';
@@ -124,6 +125,7 @@ export function App() {
         {tab === 'viewer' && <Viewer />}
         {tab === 'generator' && <Generator />}
       </main>
+      <PasswordDialog />
       <Toast />
     </div>
   );

@@ -10,8 +10,10 @@
 //! set. Growing by touching cells loses no connected result: a connected piece grows from its base
 //! one touching cell at a time, through subsets of a solvable puzzle, which are solvable. The next
 //! pass starts from the accepted result less a few random added voxels, with the added voxels that
-//! only they linked to their piece; removing voxels keeps a puzzle solvable. A check that reaches
-//! the state cap proves nothing and counts as a rejection.
+//! only they linked to their piece; removing voxels keeps a puzzle solvable. The search goes back to
+//! the base after a number of passes without improvement or, with `auto`, after a stall that grows
+//! with the length of the climb (`restart_due`). A check that reaches the state cap proves nothing
+//! and counts as a rejection.
 //!
 //! Pass results compare the number of parts first: a puzzle with a piece in several parts cannot be
 //! made or recorded, so it ranks below every puzzle that can, whatever its level, and fewer parts
@@ -53,6 +55,9 @@ pub struct GeneratorOptions {
     pub seed: u64,
     /// State cap of each check.
     pub max_states: u64,
+    /// The search sets the perturbations and the restarts itself (see `AUTO_REMOVED` and
+    /// `Generator::restart_due`); `max_removed` and `restart_after` are then unused.
+    pub auto: bool,
     /// A perturbation removes 1 to `max_removed` added voxels (R).
     pub max_removed: u32,
     /// Restart from the base after this many passes without improvement (N); 0 never restarts.
@@ -68,13 +73,22 @@ impl Default for GeneratorOptions {
         Self {
             seed: 0,
             max_states: DEFAULT_CHECK_STATES,
-            max_removed: 3,
-            restart_after: 30,
+            auto: true,
+            max_removed: 10,
+            restart_after: 100,
             keep: 20,
             fill_target: false,
         }
     }
 }
+
+/// With `auto`, a perturbation removes 1 to this many added voxels.
+const AUTO_REMOVED: u64 = 12;
+
+/// With `auto`, the stall before a restart, in multiples of the checks the climb took to reach its
+/// last improvement, and at least in passes from the base (`Generator::restart_due`).
+const AUTO_PATIENCE: u64 = 2;
+const AUTO_MIN_PASSES: u64 = 2;
 
 /// What the generator maximizes: the level, then the total moves (SPEC §4.1).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -224,6 +238,14 @@ pub struct Generator {
     from_base: bool,
     /// Passes since the accepted score last improved.
     stale: u32,
+    /// `checks` at the last restart (or the start), and at the last improvement since.
+    restarted_at: u64,
+    improved_at: u64,
+    /// `checks` at the start of the pass, and whether it started from the base.
+    pass_start: u64,
+    pass_from_base: bool,
+    /// Checks of the last pass from the base: the cost of a fresh start.
+    base_checks: u64,
     checks: u64,
     aborted: u64,
     passes: u64,
@@ -302,6 +324,11 @@ impl Generator {
             grew: false,
             from_base: true,
             stale: 0,
+            restarted_at: 0,
+            improved_at: 0,
+            pass_start: 0,
+            pass_from_base: false,
+            base_checks: 0,
             checks: 1,
             aborted: 0,
             passes: 0,
@@ -372,6 +399,8 @@ impl Generator {
     }
 
     fn start_pass(&mut self) {
+        self.pass_start = self.checks;
+        self.pass_from_base = self.from_base;
         if self.from_base {
             self.from_base = false;
             self.current = self.base.clone();
@@ -396,6 +425,9 @@ impl Generator {
     fn end_pass(&mut self, result: Option<State>) {
         self.passes += 1;
         self.next = None;
+        if self.pass_from_base {
+            self.base_checks = self.checks - self.pass_start;
+        }
         match result {
             Some(mut state) => {
                 state.extra_parts = extra_parts(&state.pieces);
@@ -405,6 +437,7 @@ impl Generator {
                     (state.rank(self.options.fill_target), self.accepted.rank(self.options.fill_target));
                 if rank > accepted {
                     self.stale = 0;
+                    self.improved_at = self.checks;
                 } else {
                     self.stale += 1;
                 }
@@ -414,12 +447,27 @@ impl Generator {
             }
             None => self.stale += 1,
         }
-        if self.options.restart_after > 0 && self.stale >= self.options.restart_after {
+        if self.restart_due() {
             self.restarts += 1;
             self.stale = 0;
+            self.restarted_at = self.checks;
+            self.improved_at = self.checks;
             self.accepted = self.base.clone();
             self.from_base = true;
         }
+    }
+
+    /// Whether the search goes back to the base. With `auto`, a climb may go without improvement for
+    /// `AUTO_PATIENCE` times the checks it took to reach its last improvement, and for at least
+    /// `AUTO_MIN_PASSES` passes from the base: a climb that kept improving (sparse designs) has
+    /// shown it can go further and seldom restarts, and one that stalls early (dense targets) soon
+    /// does. The rule counts checks, so it depends neither on pass lengths nor on `step` sizes.
+    fn restart_due(&self) -> bool {
+        if !self.options.auto {
+            return self.options.restart_after > 0 && self.stale >= self.options.restart_after;
+        }
+        let climb = self.improved_at - self.restarted_at;
+        self.checks - self.improved_at >= (AUTO_PATIENCE * climb).max(AUTO_MIN_PASSES * self.base_checks)
     }
 
     /// What adding candidate `i` to `state` does.
@@ -483,12 +531,14 @@ impl Generator {
         }
     }
 
-    /// Removes 1 to R added voxels at random. From a notchable piece, the whole line of the piece
-    /// through the voxel goes, along an axis where that line has no fixed voxel: what is left is
-    /// still notchable (any cell of its closure lies in the piece, off that line). From another
-    /// piece, the added voxels that no longer link to its base voxels go too.
+    /// Removes 1 to R (`AUTO_REMOVED` with `auto`) added voxels at random. From a notchable piece,
+    /// the whole line of the piece through the voxel goes, along an axis where that line has no
+    /// fixed voxel: what is left is still notchable (any cell of its closure lies in the piece, off
+    /// that line). From another piece, the added voxels that no longer link to its base voxels go
+    /// too.
     fn perturb(&mut self, state: &mut State) {
-        let r = 1 + self.rng.below(u64::from(self.options.max_removed.max(1)));
+        let max_removed = if self.options.auto { AUTO_REMOVED } else { u64::from(self.options.max_removed.max(1)) };
+        let r = 1 + self.rng.below(max_removed);
         for _ in 0..r {
             let added: Vec<(usize, Voxel)> = (0..state.pieces.len())
                 .flat_map(|p| state.pieces[p].iter().map(move |&v| (p, v)))

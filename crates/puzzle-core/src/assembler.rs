@@ -6,7 +6,7 @@
 //! Algorithm X with dancing links): the required cells and the pieces are primary columns, the
 //! variable cells secondary ones.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
 
 use serde::Serialize;
@@ -86,6 +86,38 @@ pub fn all_optional(target: &Target) -> Target {
     variable.sort_unstable();
     variable.dedup();
     Target { required: Vec::new(), variable }
+}
+
+/// How pieces, as placed, fit a target (SPEC §5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fit {
+    /// A target the pieces as placed fill: the target itself when they fit it, else their own
+    /// shape (see `fit_target`).
+    pub target: Target,
+    /// Required cells of the target that no piece fills.
+    pub holes: usize,
+    /// Voxels of the pieces outside the target.
+    pub outside: usize,
+}
+
+/// Pieces that leave a required cell empty, or have a voxel outside the target, have no assembly
+/// into it. Their own shape is the target less those holes, with their voxels outside it as
+/// required cells: the pieces as placed fill it, so it has at least that assembly.
+pub fn fit_target(pieces: &[Vec<Voxel>], target: &Target) -> Fit {
+    let filled: HashSet<Voxel> = pieces.iter().flatten().copied().collect();
+    let cells: HashSet<Voxel> = target.required.iter().chain(&target.variable).copied().collect();
+    let empty: HashSet<Voxel> = target.required.iter().filter(|&v| !filled.contains(v)).copied().collect();
+    let mut out: Vec<Voxel> = filled.iter().filter(|&v| !cells.contains(v)).copied().collect();
+    out.sort_unstable();
+    let (holes, outside) = (empty.len(), out.len());
+    if holes == 0 && outside == 0 {
+        return Fit { target: target.clone(), holes, outside };
+    }
+    // A hole also listed as variable was required: it stays empty.
+    let keep = |v: &&Voxel| !empty.contains(*v);
+    let required = target.required.iter().filter(keep).copied().chain(out).collect();
+    let variable = target.variable.iter().filter(keep).copied().collect();
+    Fit { target: Target { required, variable }, holes, outside }
 }
 
 /// Counts the assemblies of `pieces` (any position and orientation) into `target` (SPEC §5) and

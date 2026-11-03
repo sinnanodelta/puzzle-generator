@@ -1,7 +1,8 @@
 // The pieces of the document (SPEC §7.4): name, colour, view mode, isolation, the "must stay
 // notchable" flag, and the notchable / millable badges of the analysis. Ctrl- or Shift-clicking
 // selects several pieces, which the tools paint together; the "multi" box does it on touch screens.
-import { useState } from 'react';
+// Double-clicking (or double-tapping) the name renames the piece.
+import { useRef, useState } from 'react';
 import { MAX_PIECES, newPiece } from '../core/doc';
 import { pickPiece } from '../actions';
 import { removePiece } from '../core/edit';
@@ -18,6 +19,18 @@ export function PieceList() {
   const isolate = useStore((s) => s.isolate);
   const analysis = useStore((s) => s.analysis);
   const [multi, setMulti] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const lastClick = useRef({ id: '', time: -Infinity });
+
+  const rename = (i: number, value: string) => {
+    const name = value.trim();
+    if (name && name !== doc.pieces[i].name) {
+      editDoc((d) => {
+        d.pieces[i].name = name;
+      });
+    }
+    setEditing(null);
+  };
 
   const remove = (i: number) => {
     const p = doc.pieces[i];
@@ -56,8 +69,15 @@ export function PieceList() {
             <li
               key={p.id}
               className={i === current ? 'current' : paintedWith.includes(p.id) ? 'selected' : ''}
-              title="Ctrl-click: paint several pieces at once; Shift-click: a range"
-              onClick={(e) => pickPiece(i, multi || e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'only')}
+              title="Ctrl-click: paint several pieces at once; Shift-click: a range; double-click the name to rename"
+              onClick={(e) => {
+                const mode = multi || e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'only';
+                // A second click on the name soon after the first one renames (a double-tap on touch screens).
+                const again = mode === 'only' && lastClick.current.id === p.id && e.timeStamp - lastClick.current.time < 400;
+                lastClick.current = { id: p.id, time: again ? -Infinity : e.timeStamp };
+                if (again && (e.target as HTMLElement).closest('.piece-name')) setEditing(p.id);
+                else pickPiece(i, mode);
+              }}
             >
               <div className="piece-row">
                 <input
@@ -73,22 +93,24 @@ export function PieceList() {
                     });
                   }}
                 />
-                <input
-                  key={p.name}
-                  className="piece-name"
-                  defaultValue={p.name}
-                  onBlur={(e) => {
-                    const name = e.target.value.trim();
-                    if (name && name !== p.name) {
-                      editDoc((d) => {
-                        d.pieces[i].name = name;
-                      });
-                    } else e.target.value = p.name;
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                  }}
-                />
+                {editing === p.id ? (
+                  <input
+                    className="piece-name"
+                    autoFocus
+                    defaultValue={p.name}
+                    onClick={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={(e) => rename(i, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') e.currentTarget.value = p.name;
+                      if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+                    }}
+                  />
+                ) : (
+                  <span className="piece-name" title="Double-click (or double-tap) to rename">
+                    {p.name}
+                  </span>
+                )}
                 <button
                   className="icon"
                   title={`View: ${mode} (click to change)`}

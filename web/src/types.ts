@@ -88,6 +88,8 @@ export interface KnownBurrInfo {
 export interface GeneratorOptions {
   seed: number;
   max_states: number;
+  /** The search tunes the voxels removed and the restarts itself; `max_removed` and `restart_after` are then unused. */
+  auto: boolean;
   max_removed: number;
   restart_after: number;
   keep: number;
@@ -140,4 +142,11 @@ export interface AssembleResult {
   symmetryOrder: number;
   /** The first assembly that comes apart: the voxels of each piece, in target coordinates. */
   firstSolution: Vec3[][] | null;
+  /**
+   * Required cells of the target the pieces leave empty, and voxels outside the target. When either
+   * is not 0 no assembly fills the target: the counts are for the pieces' own shape (SPEC §5).
+   * Absent in results saved before they existed.
+   */
+  holes?: number;
+  outside?: number;
 }

@@ -2,13 +2,18 @@
 // Their reports are merged into one leaderboard, deduplicated by canonical key, and flushed to the
 // store a few times a second. When the base has a target, one more worker checks the uniqueness of the
 // leaderboard entries, best first (SPEC §4.4).
+//
+// Browsers slow down, freeze or discard a page in the background, and nothing can prevent it. So the
+// run keeps the screen on while it is active (Screen Wake Lock), and is kept in IndexedDB: after the
+// page is reloaded, it resumes with fresh seeds, its leaderboard, counters and uniqueness checks.
 import { toDoc } from './core/doc';
-import { getEntry, newEntryId, putEntry, type Uniqueness, uniquenessKey, uniquenessOf } from './core/library';
+import { getEntry, newEntryId, putEntry, savedMessage, type Uniqueness, uniquenessKey } from './core/library';
 import { rate } from './core/rating';
+import { loadRun, type RunMeta, saveRun } from './core/runstore';
 import { renderThumbnail } from './core/thumbnail';
-import { type BoardEntry, type GenSettings, getState, notify, setState, type State, type UniquenessCheck } from './store';
-import type { GenEntry, PuzzleDoc, StepReport } from './types';
-import { defaultCheckStates, errorMessage } from './wasm';
+import { type BoardEntry, type GenRun, type GenSettings, getState, notify, setState, type State, type UniquenessCheck } from './store';
+import type { AssembleResult, GenEntry, PuzzleDoc, StepReport } from './types';
+import { defaultCheckStates, errorMessage, initWasm } from './wasm';
 import type { AssembleRequest, AssembleResponse } from './workers/assemble.worker';
 import type { GeneratorRequest, GeneratorResponse } from './workers/generator.worker';
 
@@ -17,15 +22,25 @@ export const BOARD_SIZE = 20;
 const FLUSH_MS = 250;
 /** The window of the checks-per-second rate. */
 const RATE_MS = 2000;
+/** How often a running run is saved. */
+const SAVE_MS = 5000;
+/** Held by the tab running the generator, so that another tab does not resume the same run. */
+const LOCK = 'puzzle-generator-run';
+
+type Totals = Pick<GenRun, 'checks' | 'aborted' | 'passes' | 'restarts'>;
 
 interface Active {
   workers: Worker[];
-  /** The latest report of each worker; its counters are totals since the start. */
+  /** The latest report of each worker; its counters are totals since the worker started. */
   reports: (StepReport | null)[];
   board: Map<string, BoardEntry>;
+  /** The start of this part of the run, and the elapsed time and totals of the parts before it. */
   started: number;
+  before: Totals & { elapsed: number };
   samples: { time: number; checks: number }[];
   timer: ReturnType<typeof setInterval>;
+  lastSave: number;
+  releaseLock: () => void;
 }
 
 let active: Active | null = null;
@@ -79,6 +94,13 @@ export function setBoardView(patch: Partial<Pick<State, 'genFilledOnly' | 'genOn
   pumpUniqueness();
 }
 
+/** Changes the settings form; they are kept with the run. */
+export function setSettings(patch: Partial<GenSettings>): void {
+  setState((s) => ({ genSettings: { ...s.genSettings, ...patch } }));
+  if ('keepAwake' in patch) void updateWakeLock();
+  scheduleSave();
+}
+
 /** The settings as integers in range; the fields of the form may hold anything. */
 function normalized(s: GenSettings): GenSettings {
   const int = (v: number, min: number, max = Number.MAX_SAFE_INTEGER) =>
@@ -87,11 +109,13 @@ function normalized(s: GenSettings): GenSettings {
     workers: int(s.workers, 1, 64),
     seed: int(s.seed, 0),
     maxStates: s.maxStates === null ? null : int(s.maxStates, 1),
+    auto: s.auto,
     maxRemoved: int(s.maxRemoved, 1),
     restartAfter: int(s.restartAfter, 0),
     timeLimit: int(s.timeLimit, 0),
     targetLevel: int(s.targetLevel, 0),
     fillTarget: s.fillTarget,
+    keepAwake: s.keepAwake,
   };
 }
 
@@ -100,36 +124,45 @@ export function startGenerator(): void {
   if (active) return;
   cancelUniqueness();
   const settings = normalized(getState().genSettings);
-  const base = toDoc(getState().doc);
+  const gen: GenRun = {
+    base: toDoc(getState().doc),
+    settings,
+    running: true,
+    elapsed: 0,
+    checks: 0,
+    aborted: 0,
+    passes: 0,
+    restarts: 0,
+    checksPerSecond: 0,
+    resumes: 0,
+    board: [],
+    saved: [],
+    uniqueness: {},
+    stopReason: null,
+    error: null,
+  };
+  setState({ genSettings: settings, genSelected: null, gen });
+  launch(gen);
+}
+
+/** Runs the workers of `gen`, continuing its counters and leaderboard. */
+function launch(gen: GenRun): void {
+  const { settings, base } = gen;
   const run: Active = {
     workers: [],
     reports: Array<StepReport | null>(settings.workers).fill(null),
-    board: new Map(),
+    board: new Map(gen.board.map((e) => [e.key, e])),
     started: performance.now(),
+    before: { elapsed: gen.elapsed, checks: gen.checks, aborted: gen.aborted, passes: gen.passes, restarts: gen.restarts },
     samples: [],
     timer: setInterval(() => flush(), FLUSH_MS),
+    lastSave: performance.now(),
+    releaseLock: () => {},
   };
   active = run;
-  setState({
-    genSettings: settings,
-    genSelected: null,
-    gen: {
-      base,
-      settings,
-      running: true,
-      elapsed: 0,
-      checks: 0,
-      aborted: 0,
-      passes: 0,
-      restarts: 0,
-      checksPerSecond: 0,
-      board: [],
-      saved: [],
-      uniqueness: {},
-      stopReason: null,
-      error: null,
-    },
-  });
+  void takeLock(run);
+  void updateWakeLock();
+  saveNow();
   const maxStates = settings.maxStates ?? defaultCheckStates();
   for (let i = 0; i < settings.workers; i++) {
     const worker = new Worker(new URL('./workers/generator.worker.ts', import.meta.url), { type: 'module' });
@@ -145,8 +178,10 @@ export function startGenerator(): void {
     const request: GeneratorRequest = {
       doc: base,
       options: {
-        seed: settings.seed + i,
+        // Each resumed part of the run continues with seeds no worker has used yet.
+        seed: settings.seed + i + gen.resumes * settings.workers,
         max_states: maxStates,
+        auto: settings.auto,
         max_removed: settings.maxRemoved,
         restart_after: settings.restartAfter,
         keep: BOARD_SIZE,
@@ -160,7 +195,7 @@ export function startGenerator(): void {
 
 function receive(run: Active, worker: number, report: StepReport): void {
   run.reports[worker] = report;
-  const found = performance.now() - run.started;
+  const found = run.before.elapsed + performance.now() - run.started;
   for (const entry of report.entries) {
     if (!run.board.has(entry.key)) run.board.set(entry.key, { ...entry, found });
   }
@@ -176,8 +211,8 @@ function flush(stop?: { reason: string; error: string | null }): void {
   const run = active;
   if (!run) return;
   const now = performance.now();
-  const elapsed = now - run.started;
-  const totals = { checks: 0, aborted: 0, passes: 0, restarts: 0 };
+  const elapsed = run.before.elapsed + now - run.started;
+  const totals: Totals = { checks: run.before.checks, aborted: run.before.aborted, passes: run.before.passes, restarts: run.before.restarts };
   for (const r of run.reports) {
     if (!r) continue;
     totals.checks += r.checks;
@@ -190,20 +225,29 @@ function flush(stop?: { reason: string; error: string | null }): void {
   const first = run.samples[0];
   const span = (now - first.time) / 1000;
   const checksPerSecond = span > 0 ? (totals.checks - first.checks) / span : 0;
-  const board = [...run.board.values()].sort(better);
-  setState((s) => ({
-    gen: s.gen && {
-      ...s.gen,
-      ...totals,
-      elapsed,
-      checksPerSecond,
-      board,
-      running: !stop,
-      stopReason: stop?.reason ?? null,
-      error: stop?.error ?? null,
-    },
-  }));
+  const sorted = [...run.board.values()].sort(better);
+  setState((s) => {
+    if (!s.gen) return {};
+    // The same entries keep the same array, so the leaderboard is saved only when it changes.
+    const same = sorted.length === s.gen.board.length && sorted.every((e, i) => e === s.gen!.board[i]);
+    return {
+      gen: {
+        ...s.gen,
+        ...totals,
+        elapsed,
+        checksPerSecond,
+        board: same ? s.gen.board : sorted,
+        running: !stop,
+        stopReason: stop?.reason ?? null,
+        error: stop?.error ?? null,
+      },
+    };
+  });
   pumpUniqueness();
+  if (stop || now - run.lastSave >= SAVE_MS) {
+    run.lastSave = now;
+    saveNow();
+  }
   const limit = getState().gen?.settings.timeLimit ?? 0;
   if (!stop && limit > 0 && elapsed >= limit * 1000) stopGenerator('Time limit reached');
 }
@@ -216,6 +260,8 @@ export function stopGenerator(reason = 'Stopped', error: string | null = null): 
   active = null;
   clearInterval(run.timer);
   for (const worker of run.workers) worker.terminate();
+  run.releaseLock();
+  void updateWakeLock();
 }
 
 /** Saves a leaderboard entry to the library, with its uniqueness result once there is one. */
@@ -225,7 +271,7 @@ export async function saveEntry(entry: GenEntry): Promise<void> {
   const id = newEntryId();
   const check = getState().gen?.uniqueness[entry.key];
   savedIds.set(entry.key, id);
-  await putEntry({
+  const scope = await putEntry({
     id,
     name: doc.name,
     doc,
@@ -233,6 +279,7 @@ export async function saveEntry(entry: GenEntry): Promise<void> {
     meta: {
       status: 'solved',
       levelString: entry.level_string,
+      moves: entry.score.total_moves,
       uniqueness: check?.kind === 'done' ? check.result : null,
       created: now,
       updated: now,
@@ -240,10 +287,145 @@ export async function saveEntry(entry: GenEntry): Promise<void> {
   });
   setState((s) => ({
     libraryVersion: s.libraryVersion + 1,
-    message: `Saved “${doc.name}” to the library`,
+    message: savedMessage(scope, doc.name),
     gen: s.gen && { ...s.gen, saved: [...s.gen.saved, entry.key] },
   }));
+  scheduleSave();
 }
+
+// --- Screen wake lock and the run lock ----------------------------------------------------------
+
+let wakeLock: WakeLockSentinel | null = null;
+let wakeLockPending = false;
+
+/** Holds the screen wake lock while a run is active, the page visible and the setting on; the browser releases it when the page is hidden. */
+async function updateWakeLock(): Promise<void> {
+  const want = active !== null && getState().genSettings.keepAwake && document.visibilityState === 'visible';
+  if (!want && wakeLock) {
+    const lock = wakeLock;
+    wakeLock = null;
+    await lock.release().catch(() => {});
+  } else if (want && !wakeLock && !wakeLockPending && 'wakeLock' in navigator) {
+    wakeLockPending = true;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      lock.addEventListener('release', () => {
+        if (wakeLock === lock) wakeLock = null;
+        setState({ genScreenOn: wakeLock !== null });
+      });
+      wakeLock = lock;
+      // The run may have stopped while the lock was requested.
+      if (active === null || !getState().genSettings.keepAwake) await updateWakeLock();
+    } catch {
+      // Refused (no user activation yet, battery saver, permissions policy): the run goes on.
+    } finally {
+      wakeLockPending = false;
+    }
+  }
+  setState({ genScreenOn: wakeLock !== null });
+}
+
+export function wakeLockSupported(): boolean {
+  return 'wakeLock' in navigator;
+}
+
+/** Holds the run lock for `run` until it stops. */
+async function takeLock(run: Active): Promise<void> {
+  if (!('locks' in navigator)) return;
+  await navigator.locks.request(LOCK, { ifAvailable: true }, (lock) => {
+    if (!lock || active !== run) return;
+    return new Promise<void>((release) => (run.releaseLock = release));
+  });
+}
+
+// --- Saving and resuming ------------------------------------------------------------------------
+
+/** The leaderboard last saved (or being saved). */
+let savedBoard: { board: unknown; uniqueness: unknown; saved: unknown } | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/** Restoring has finished: saving before would overwrite the run of the last visit. */
+let restored = false;
+
+/** Saves the run soon: for changes while no run is active. */
+function scheduleSave(): void {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 1000);
+}
+
+/** Saves the run and the settings form; the leaderboard only when it changed. */
+function saveNow(): void {
+  clearTimeout(saveTimer);
+  if (!restored) return;
+  const s = getState();
+  const gen = s.gen;
+  const meta: RunMeta | null = gen && {
+    base: gen.base,
+    settings: gen.settings,
+    running: gen.running,
+    elapsed: gen.elapsed,
+    checks: gen.checks,
+    aborted: gen.aborted,
+    passes: gen.passes,
+    restarts: gen.restarts,
+    checksPerSecond: 0,
+    resumes: gen.resumes,
+    stopReason: gen.stopReason,
+    error: gen.error,
+    form: s.genSettings,
+  };
+  const board =
+    gen && (savedBoard?.board !== gen.board || savedBoard.uniqueness !== gen.uniqueness || savedBoard.saved !== gen.saved)
+      ? { board: gen.board, uniqueness: gen.uniqueness, saved: gen.saved, savedIds: [...savedIds] }
+      : null;
+  if (!meta) return;
+  if (board) savedBoard = board;
+  saveRun(meta, board).catch(() => {
+    // Storage full or blocked: the run goes on, it just cannot be resumed. The next save writes the leaderboard again.
+    savedBoard = null;
+  });
+}
+
+/** Restores the run of the last visit, and resumes it when it was running and no other tab runs it. */
+async function restoreRun(): Promise<void> {
+  try {
+    await initWasm();
+    const saved = await loadRun();
+    if (!saved || getState().gen) return;
+    const { form, ...meta } = saved.meta;
+    // A check that was running when the page went away starts again.
+    const uniqueness = Object.fromEntries(Object.entries(saved.board.uniqueness).filter(([, c]) => c.kind !== 'checking'));
+    const gen: GenRun = { ...meta, board: saved.board.board, saved: saved.board.saved, uniqueness, running: false, checksPerSecond: 0 };
+    for (const [key, id] of saved.board.savedIds) savedIds.set(key, id);
+    savedBoard = { board: gen.board, uniqueness: gen.uniqueness, saved: gen.saved };
+    setState({ gen, genSettings: { ...getState().genSettings, ...form } });
+    restored = true;
+    if (meta.running && !active) {
+      const held = 'locks' in navigator ? ((await navigator.locks.query()).held ?? []) : [];
+      if (!held.some((l) => l.name === LOCK)) {
+        const next = { ...gen, running: true, resumes: gen.resumes + 1, stopReason: null };
+        setState({ gen: next });
+        launch(next);
+        const discarded = (document as Document & { wasDiscarded?: boolean }).wasDiscarded;
+        notify(`Generator run resumed${discarded ? ' after the browser discarded the page' : ' after the page was reloaded'}`);
+      } else {
+        setState({ gen: { ...gen, stopReason: 'Running in another tab' } });
+      }
+    }
+    pumpUniqueness();
+  } catch {
+    // No storage: nothing to restore.
+  } finally {
+    restored = true;
+  }
+}
+
+void restoreRun();
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveNow();
+  void updateWakeLock();
+});
+window.addEventListener('pagehide', saveNow);
 
 // --- Uniqueness ---------------------------------------------------------------------------------
 
@@ -261,11 +443,17 @@ let lastJobId = 0;
 /** The library entries saved from the leaderboard, by entry key: they get the uniqueness result when it comes. */
 const savedIds = new Map<string, string>();
 
+/** The result without its first solution, which the leaderboard does not keep. */
+function uniqueness(result: AssembleResult): Uniqueness {
+  const { firstSolution: _, ...rest } = result;
+  return rest;
+}
+
 function newAssembler(): Worker {
   const worker = new Worker(new URL('./workers/assemble.worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = (e: MessageEvent<AssembleResponse>) => {
     if (!job || job.id !== e.data.id) return;
-    finish(job, 'error' in e.data ? { kind: 'failed', error: e.data.error } : { kind: 'done', result: uniquenessOf(e.data.result) });
+    finish(job, 'error' in e.data ? { kind: 'failed', error: e.data.error } : { kind: 'done', result: uniqueness(e.data.result) });
   };
   worker.onerror = (e) => {
     e.preventDefault();
@@ -284,6 +472,7 @@ function finish(done: UniquenessJob, check: UniquenessCheck): void {
   job = null;
   setUniqueness(done.base, done.key, check);
   if (check.kind === 'done') recordUniqueness(done, check.result).catch((e) => notify(errorMessage(e)));
+  if (!active) scheduleSave();
   pumpUniqueness();
 }
 

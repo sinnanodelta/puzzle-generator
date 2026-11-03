@@ -27,7 +27,9 @@ export function analyze(doc_json: string): string;
 /**
  * Counts the assemblies of the fixed voxels of a document's pieces into its target and solves
  * each one (SPEC §5), with at most `max_states` states per solve and `max_assemblies` distinct
- * assemblies. Returns an `AssembleResult`; errors when the document has no target.
+ * assemblies. Pieces that, as placed, leave required cells empty (`holes`) or stick out of the
+ * target (`outside`) are counted into their own shape instead (`fit_target`). Returns an
+ * `AssembleResult` with `holes` and `outside`; errors when the document has no target.
  */
 export function assemble(doc_json: string, max_states: number, max_assemblies: number): string;
 

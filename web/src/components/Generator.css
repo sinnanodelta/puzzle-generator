@@ -1,0 +1,462 @@
+/* The generator tab (SPEC §4.4). Wide screens: the run bar and the settings on the left, the
+   leaderboard, the 3D view. Small screens: the run bar, one pane (settings or leaderboard) that
+   scrolls inside, and the 3D view below; the page never scrolls. */
+
+.generator {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'bar board scene'
+    'panel board scene';
+}
+
+.gen-bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.gen-bar > button {
+  min-width: 76px;
+  font-weight: 600;
+}
+
+.gen-status {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.gen-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gen-state {
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-state.bad,
+.gen-error {
+  color: var(--bad);
+}
+
+.gen-error {
+  white-space: pre-wrap;
+  margin: 10px 0 0;
+}
+
+.gen-panel {
+  grid-area: panel;
+  overflow: auto;
+  padding: 0 12px 16px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.gen-section h4 {
+  margin: 14px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.gen-panel .field {
+  margin: 6px 0;
+  flex-wrap: nowrap;
+}
+
+.gen-panel .field > span:first-child {
+  min-width: 104px;
+}
+
+.gen-panel input[type='number'] {
+  width: 110px;
+  min-width: 0;
+}
+
+.gen-check {
+  cursor: pointer;
+}
+
+.gen-panel .gen-check > span {
+  min-width: 0;
+  color: var(--text);
+}
+
+.gen-advanced {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0 6px;
+}
+
+.gen-advanced summary {
+  cursor: pointer;
+  padding: 8px 0 4px;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gen-note {
+  margin: 4px 0 0;
+  line-height: 1.35;
+}
+
+.gen-base {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gen-base strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gen-counters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-counters > div {
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.gen-counters dt {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.gen-counters dd {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gen-board {
+  grid-area: board;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.gen-board-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 10px 12px 4px;
+}
+
+.gen-filters {
+  display: flex;
+  gap: 6px;
+  padding: 4px 12px 8px;
+  flex-wrap: wrap;
+}
+
+.gen-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gen-chip.on {
+  border-color: var(--accent);
+  color: var(--text);
+  background: #22324f;
+}
+
+.gen-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gen-chip:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.gen-board-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+
+.generator .leaderboard thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.generator .leaderboard th,
+.generator .leaderboard td {
+  padding: 4px 6px;
+}
+
+.generator .leaderboard td {
+  font-variant-numeric: tabular-nums;
+}
+
+.generator .leaderboard tbody tr {
+  cursor: pointer;
+}
+
+.generator .leaderboard tbody tr:hover {
+  background: var(--panel);
+}
+
+.generator .leaderboard tbody tr.selected {
+  background: var(--panel-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.generator .leaderboard td.holes,
+.gen-cards .holes {
+  color: var(--warn);
+}
+
+.gen-row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.gen-row-actions button {
+  padding: 1px 7px;
+  font-size: 12px;
+}
+
+.gen-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.gen-scene {
+  grid-area: scene;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gen-caption {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(31, 34, 41, 0.85);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* The leaderboard as cards. */
+.gen-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gen-cards li {
+  display: flex;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.gen-cards li.selected {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.gen-card-rank {
+  min-width: 1.6em;
+  padding-top: 2px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.gen-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gen-card-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 13px;
+}
+
+.gen-card-level {
+  font-size: 16px;
+}
+
+.gen-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.gen-card-actions button {
+  flex: 1;
+}
+
+@media (max-width: 1100px) and (min-width: 821px) {
+  .generator {
+    grid-template-columns: 270px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 42%);
+    grid-template-areas:
+      'bar board'
+      'panel board'
+      'panel scene';
+  }
+
+  .gen-scene {
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 820px) {
+  .generator {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 38%);
+    grid-template-areas:
+      'bar'
+      'pane'
+      'scene';
+  }
+
+  .gen-bar {
+    gap: 8px;
+    padding: 6px;
+    border-right: 0;
+  }
+
+  .gen-bar > button {
+    min-width: 64px;
+  }
+
+  .gen-pane-switch {
+    flex: none;
+  }
+
+  .gen-pane-switch > button {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  .gen-panel,
+  .gen-board {
+    grid-area: pane;
+    border-right: 0;
+  }
+
+  .generator.pane-settings .gen-board,
+  .generator.pane-board .gen-panel {
+    display: none;
+  }
+
+  .gen-panel {
+    padding: 0 10px 12px;
+  }
+
+  .gen-panel .field > span:first-child {
+    min-width: 96px;
+  }
+
+  .gen-board-header {
+    padding: 6px 8px 2px;
+  }
+
+  .gen-board-header h2 {
+    display: none;
+  }
+
+  /* One row of filters that scrolls sideways. */
+  .gen-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 4px 8px 6px;
+    scrollbar-width: none;
+  }
+
+  .gen-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gen-board-body {
+    padding: 0 8px 8px;
+  }
+
+  .gen-scene {
+    border-top: 1px solid var(--border);
+  }
+
+  /* The 3D view takes the touch gestures. */
+  .gen-scene canvas {
+    touch-action: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .gen-chip {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .gen-cards li {
+    padding: 9px 10px;
+  }
+}

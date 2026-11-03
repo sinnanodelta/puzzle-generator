@@ -125,16 +125,29 @@ pub fn default_max_assemblies() -> f64 {
     puzzle_core::assembler::DEFAULT_MAX_ASSEMBLIES as f64
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Uniqueness {
+    #[serde(flatten)]
+    result: puzzle_core::AssembleResult,
+    holes: usize,
+    outside: usize,
+}
+
 /// Counts the assemblies of the fixed voxels of a document's pieces into its target and solves
 /// each one (SPEC §5), with at most `max_states` states per solve and `max_assemblies` distinct
-/// assemblies. Returns an `AssembleResult`; errors when the document has no target.
+/// assemblies. Pieces that, as placed, leave required cells empty (`holes`) or stick out of the
+/// target (`outside`) are counted into their own shape instead (`fit_target`). Returns an
+/// `AssembleResult` with `holes` and `outside`; errors when the document has no target.
 #[wasm_bindgen]
 pub fn assemble(doc_json: &str, max_states: f64, max_assemblies: f64) -> Result<String, JsError> {
     let doc = Document::from_json(doc_json)?;
     let target = doc.target.as_ref().ok_or_else(|| JsError::new("the document has no target"))?;
     let pieces: Vec<Vec<_>> = doc.pieces.iter().map(|p| p.fixed.clone()).collect();
     let options = puzzle_core::AssembleOptions { max_states: max_states as u64, max_assemblies: max_assemblies as u64 };
-    Ok(to_json(&puzzle_core::assemble(&pieces, target, &options)?))
+    let fit = puzzle_core::fit_target(&pieces, target);
+    let result = puzzle_core::assemble(&pieces, &fit.target, &options)?;
+    Ok(to_json(&Uniqueness { result, holes: fit.holes, outside: fit.outside }))
 }
 
 /// A generator run on a base document (SPEC §4), advanced by `step` so that a worker can report

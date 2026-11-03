@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { keepDraft } from './draft';
 import './styles.css';
 import { errorMessage, initWasm } from './wasm';
 
@@ -10,11 +11,13 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorke
 const root = createRoot(document.getElementById('root')!);
 
 initWasm().then(
-  () =>
+  () => {
+    keepDraft();
     root.render(
       <StrictMode>
         <App />
       </StrictMode>,
-    ),
+    );
+  },
   (e) => root.render(<pre className="fatal">Could not load the solver: {errorMessage(e)}</pre>),
 );

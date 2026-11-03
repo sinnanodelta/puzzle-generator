@@ -5,7 +5,8 @@ use puzzle_core::fixtures::parse_fixtures;
 use puzzle_core::model::Target;
 use puzzle_core::templates::known_burr;
 use puzzle_core::{
-    AssembleOptions, AssembleResult, AssembleStatus, ModelError, Puzzle, Voxel, all_optional, assemble, canonical_key,
+    AssembleOptions, AssembleResult, AssembleStatus, Fit, ModelError, Puzzle, Voxel, all_optional, assemble,
+    canonical_key, fit_target,
 };
 
 const FIXTURES: &str = include_str!("../../../fixtures/burrs.json");
@@ -167,6 +168,32 @@ fn invalid_input_is_an_error() {
     assert_eq!(assemble(&[vec![[0, 0, 0]], Vec::new()], &target, &options), Err(ModelError::EmptyPiece(1)));
     let wide = required(vec![[0, 0, 0], [40, 0, 0]]);
     assert_eq!(assemble(&[vec![[0, 0, 0]], vec![[0, 0, 0]]], &wide, &options), Err(ModelError::GridSize([41, 1, 1])));
+}
+
+#[test]
+fn pieces_that_do_not_fit_count_in_their_own_shape() {
+    // A domino and a cube leave a hole in a 2×2 square: no assembly fills it, but the L they form
+    // has the pieces' own assembly.
+    let pieces = [vec![[0, 0, 0], [1, 0, 0]], vec![[0, 1, 0]]];
+    let square = required(cuboid([0, 0, 0], [1, 1, 0]));
+    assert_eq!(run(&pieces, &square).assemblies, 0);
+    let fit = fit_target(&pieces, &square);
+    assert_eq!((fit.holes, fit.outside), (1, 0));
+    assert_eq!(fit.target, required(vec![[0, 0, 0], [1, 0, 0], [0, 1, 0]]));
+    assert_eq!(counts(&run(&pieces, &fit.target)), (1, 1, true, 2));
+
+    // A voxel outside the target becomes a required cell of the shape; a hole also listed as
+    // variable stays empty.
+    let target = Target { required: vec![[0, 0, 0], [1, 0, 0], [1, 1, 0]], variable: vec![[1, 1, 0], [0, 1, 0]] };
+    let pieces = [vec![[0, 0, 0], [1, 0, 0]], vec![[0, 1, 0], [0, 2, 0]]];
+    let fit = fit_target(&pieces, &target);
+    assert_eq!((fit.holes, fit.outside), (1, 1));
+    assert_eq!(fit.target, Target { required: vec![[0, 0, 0], [1, 0, 0], [0, 2, 0]], variable: vec![[0, 1, 0]] });
+    assert!(run(&pieces, &fit.target).assemblies >= 1);
+
+    // Pieces that fit keep the target.
+    let pieces = [vec![[0, 0, 0], [1, 0, 0]], vec![[0, 1, 0], [1, 1, 0]]];
+    assert_eq!(fit_target(&pieces, &square), Fit { target: square, holes: 0, outside: 0 });
 }
 
 #[test]

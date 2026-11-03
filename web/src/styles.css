@@ -352,17 +352,20 @@ table.burrs th {
 
 /* --- Library ------------------------------------------------------------------------------- */
 
+/* The header, path and notices stay on top; the list scrolls below (more rules in library.css). */
 .library {
   height: 100%;
-  overflow: auto;
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 16px 0;
 }
 
 .library-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
 }
 
 .library .empty-state {
@@ -451,15 +454,140 @@ table.burrs th {
     'status status';
 }
 
+/* Two rows of constant height: the tools, then the options of the active tool. */
 .toolbar {
   grid-area: toolbar;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 10px;
+  flex-direction: column;
+  min-width: 0;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 4px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.toolbar-row > * {
+  flex: none;
+}
+
+.toolbar-row.context {
+  background: #1b1d23;
+  border-top: 1px solid var(--border);
+}
+
+.tool-icon {
+  margin-right: 5px;
+}
+
+.menu-button .caret {
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.menu-button .swatch {
+  margin-right: 6px;
+}
+
+.menu-panel {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 170px;
+  max-width: calc(100vw - 16px);
+  overflow: auto;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.menu-title,
+.menu-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.menu-hint {
+  max-width: 290px;
+}
+
+.menu-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.axis-pad {
+  display: flex;
+  gap: 10px;
+}
+
+.axis-pad > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.axis-pad button {
+  min-width: 46px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+table.shapes {
+  border-collapse: collapse;
+}
+
+table.shapes th,
+table.shapes td {
+  padding: 3px 4px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+table.shapes tbody th {
+  text-align: left;
+  font-weight: 500;
+}
+
+table.shapes thead th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dim);
+  vertical-align: bottom;
+}
+
+table.shapes thead small {
+  display: block;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+table.shapes tr.clear-row > * {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
 }
 
 .grid-size {
@@ -524,6 +652,15 @@ table.burrs th {
 .piece-name:focus {
   border-color: var(--border);
   background: var(--bg);
+}
+
+span.piece-name {
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 button.icon {
@@ -631,18 +768,39 @@ button.icon.on {
   font-size: 12px;
 }
 
+/* One line of fixed height, so the views above do not move when the text changes. */
 .status-bar {
   grid-area: status;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 10px;
+  height: 36px;
+  padding: 0 10px;
+  overflow: hidden;
+  white-space: nowrap;
   background: var(--panel);
   border-top: 1px solid var(--border);
 }
 
+.status-bar > * {
+  flex: none;
+}
+
 .status {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
+}
+
+.status-bar .counts {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.counts > span + span::before {
+  content: '· ';
 }
 
 .status.ok {
@@ -797,113 +955,8 @@ button.icon.on {
 
 /* --- Generator ----------------------------------------------------------------------------- */
 
-.generator {
-  height: 100%;
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.gen-panel {
-  overflow: auto;
-  padding: 4px 12px 12px;
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-}
-
-.gen-panel .field > span:first-child {
-  min-width: 100px;
-}
-
-.gen-panel input[type='number'] {
-  width: 100px;
-}
-
-.gen-base {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.gen-base strong {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gen-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 0 10px;
-}
-
-.gen-actions button {
-  min-width: 72px;
-}
-
-.gen-state.bad,
-.gen-error {
-  color: var(--bad);
-}
-
-.gen-error {
-  white-space: pre-wrap;
-  margin: 0 0 10px;
-}
-
-.counters {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 12px;
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.counters dt {
-  color: var(--dim);
-}
-
-.counters dd {
-  margin: 0;
-}
-
-.gen-board {
-  overflow: auto;
-  padding: 4px 12px 12px;
-  border-right: 1px solid var(--border);
-}
-
-.gen-board .panel-header {
-  padding: 6px 0 10px;
-}
-
-.leaderboard td {
-  font-variant-numeric: tabular-nums;
-}
-
-.leaderboard tbody tr {
-  cursor: pointer;
-}
-
-.leaderboard tbody tr:hover {
-  background: var(--panel);
-}
-
-.leaderboard tbody tr.selected {
-  background: var(--panel-2);
-}
-
-.gen-filters {
-  display: inline-flex;
-  gap: 14px;
-  margin-left: auto;
-}
-
-.leaderboard td.holes {
-  color: var(--warn);
-}
+/* The generator tab is styled in components/Generator.css. The uniqueness badge (SPEC §4.4) is also
+   shown in the library. */
 
 .uniq {
   display: inline-block;
@@ -931,31 +984,9 @@ button.icon.on {
   border-color: transparent;
 }
 
-.row-actions {
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
-}
-
-.row-actions button {
-  padding: 1px 7px;
-  font-size: 12px;
-}
-
-.gen-scene {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-}
-
-.gen-caption {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(31, 34, 41, 0.85);
-  font-size: 12px;
+/* Counted in the puzzle's own shape: it does not fit the target. */
+.uniq.shape {
+  border-style: dashed;
 }
 
 /* --- Touch screens and small screens (SPEC §9.2) -------------------------------------------- */
@@ -986,6 +1017,18 @@ canvas {
 
   .piece-list li {
     padding: 8px;
+  }
+
+  .toolbar-row {
+    min-height: 44px;
+  }
+
+  .status-bar {
+    height: 44px;
+  }
+
+  .menu-checks {
+    gap: 14px;
   }
 }
 
@@ -1051,14 +1094,40 @@ canvas {
       'status status';
   }
 
-  .toolbar {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding: 4px 6px;
+  .toolbar-row {
+    gap: 6px;
+    padding: 3px 6px;
   }
 
-  .toolbar > * {
-    flex: none;
+  .tool-label {
+    display: none;
+  }
+
+  .tool-icon {
+    margin-right: 0;
+  }
+
+  .toolbar-row .segmented > button {
+    min-width: 34px;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .status-bar {
+    gap: 8px;
+    padding: 0 6px;
+  }
+
+  .status-bar .count-pieces {
+    display: none;
+  }
+
+  .status-bar .count-pieces + span::before {
+    content: none;
+  }
+
+  .status-bar .counts {
+    font-size: 12px;
   }
 
   .layer-view {
@@ -1102,17 +1171,6 @@ canvas {
   .viewer-body > :not(.viewer-scene) {
     min-height: 0;
     overflow: auto;
-  }
-
-  .generator {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.1fr);
-  }
-
-  .gen-panel,
-  .gen-board {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
   }
 
   .modal {

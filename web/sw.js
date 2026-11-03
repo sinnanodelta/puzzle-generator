@@ -15,7 +15,9 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const r = e.request;
-  if (r.method !== 'GET' || new URL(r.url).origin !== location.origin) return;
+  const url = new URL(r.url);
+  // The shared library (/api/) always goes to the network: the app keeps its own copy of it.
+  if (r.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     (async () => {
       const cache = await caches.open(VERSION);

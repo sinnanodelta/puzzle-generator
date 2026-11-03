@@ -90,27 +90,31 @@ fn entries_are_valid_and_scored() {
 
 #[test]
 fn runs_do_not_depend_on_steps() {
-    let base = template(true);
-    let mut whole = Generator::new(&base, options(7)).unwrap();
-    let mut pieces = Generator::new(&base, options(7)).unwrap();
-    let report = whole.step(3_000);
-    let mut last = None;
-    let mut entries = 0;
-    for _ in 0..3_000 {
-        let r = pieces.step(1);
-        entries += r.entries.len();
-        last = Some(r);
+    for (auto, notchable) in [(true, true), (false, true), (true, false)] {
+        let base = template(notchable);
+        let options = |seed| GeneratorOptions { auto, ..options(seed) };
+        let mut whole = Generator::new(&base, options(7)).unwrap();
+        let mut pieces = Generator::new(&base, options(7)).unwrap();
+        let report = whole.step(6_000);
+        // A step ends between candidates, and the joins at the end of a pass check more than once,
+        // so the small steps run to the same total.
+        let mut last = pieces.step(1);
+        let mut entries = last.entries.len();
+        while last.checks < report.checks {
+            last = pieces.step(1);
+            entries += last.entries.len();
+        }
+        assert_eq!(whole.board(), pieces.board());
+        assert!(entries >= pieces.board().len());
+        assert_eq!(
+            (report.checks, report.aborted, report.passes, report.restarts, report.current, report.best),
+            (last.checks, last.aborted, last.passes, last.restarts, last.current, last.best)
+        );
+        assert!(report.restarts > 0, "auto {auto}: no restart to compare");
+        let other = Generator::new(&base, options(8)).unwrap().step(6_000);
+        assert!(!report.entries.is_empty());
+        assert_ne!(other.entries, report.entries, "seeds 7 and 8 gave the same run");
     }
-    let last = last.unwrap();
-    assert_eq!(whole.board(), pieces.board());
-    assert!(entries >= pieces.board().len());
-    assert_eq!(
-        (report.checks, report.aborted, report.passes, report.restarts, report.current, report.best),
-        (last.checks, last.aborted, last.passes, last.restarts, last.current, last.best)
-    );
-    let other = Generator::new(&base, options(8)).unwrap().step(3_000);
-    assert!(!report.entries.is_empty());
-    assert_ne!(other.entries, report.entries, "seeds 7 and 8 gave the same run");
 }
 
 #[test]
@@ -148,11 +152,28 @@ fn raises_the_level_of_the_template() {
 
 #[test]
 fn restarts_after_stale_passes() {
-    let options = GeneratorOptions { restart_after: 5, ..options(3) };
+    let options = GeneratorOptions { auto: false, restart_after: 5, ..options(3) };
     let report = Generator::new(&template(false), options).unwrap().step(5_000);
     assert!(report.restarts > 0);
     let options = GeneratorOptions { restart_after: 0, ..options };
     assert_eq!(Generator::new(&template(false), options).unwrap().step(5_000).restarts, 0);
+}
+
+#[test]
+fn auto_sets_removals_and_restarts() {
+    let base = template(false);
+    let run = |options: GeneratorOptions| {
+        let mut generator = Generator::new(&base, options).unwrap();
+        let report = generator.step(20_000);
+        (report.restarts, generator.board().to_vec())
+    };
+    // `max_removed` and `restart_after` are unused.
+    let (restarts, board) = run(options(5));
+    assert_eq!(run(GeneratorOptions { max_removed: 1, restart_after: 1, ..options(5) }), (restarts, board));
+    // A stalled climb restarts, but later than after a few stale passes: its patience grows with
+    // the time it has been improving, and is at least a few passes from the base.
+    let eager = run(GeneratorOptions { auto: false, restart_after: 3, ..options(5) }).0;
+    assert!(restarts > 0 && restarts < eager, "{restarts} restarts with auto, {eager} after 3 stale passes");
 }
 
 #[test]

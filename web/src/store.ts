@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { Checker, type CheckState, solveInWorker } from './core/checker';
 import { type EDoc, cloneDoc, docEquals, emptyDoc, fixedSignature, fromDoc, toDoc } from './core/doc';
 import type { CellState, TargetKind } from './core/edit';
-import { type EntryMeta, getEntry, newEntryId, putEntry, type Uniqueness, uniquenessKey } from './core/library';
+import { type EntryMeta, getEntry, newEntryId, putEntry, savedMessage, type Uniqueness, uniquenessKey } from './core/library';
 import { renderThumbnail } from './core/thumbnail';
 import type { Analysis, GenEntry, PuzzleDoc, SolveResult, Vec3 } from './types';
 import { analyze, defaultMaxStates, errorMessage } from './wasm';
@@ -29,6 +29,8 @@ export interface GenSettings {
   seed: number;
   /** The state cap of a check; null is the default cap. */
   maxStates: number | null;
+  /** The search tunes the voxels removed between passes and the restarts itself; `maxRemoved` and `restartAfter` are then unused (SPEC §4.2). */
+  auto: boolean;
   /** The largest number of voxels removed between greedy passes (R). */
   maxRemoved: number;
   /** Passes without improvement before a restart from the base (N); 0 never restarts. */
@@ -39,6 +41,8 @@ export interface GenSettings {
   targetLevel: number;
   /** The search prefers fewer holes in the target to a higher level (SPEC §4.2). */
   fillTarget: boolean;
+  /** Keeps the screen on while a run is active (Screen Wake Lock, SPEC §4.3). */
+  keepAwake: boolean;
 }
 
 /** A leaderboard entry, found `found` ms after the start of the run. */
@@ -61,6 +65,8 @@ export interface GenRun {
   passes: number;
   restarts: number;
   checksPerSecond: number;
+  /** Times the run was resumed after the page was reloaded (SPEC §4.3). */
+  resumes: number;
   /** The best distinct puzzles of all workers, and the best without holes, best first. */
   board: BoardEntry[];
   /** The keys of the entries saved to the library. */
@@ -126,6 +132,8 @@ export interface State {
   genOnePerLevel: boolean;
   /** The leaderboard is sorted by rating. */
   genByRating: boolean;
+  /** The screen wake lock of the run is held. */
+  genScreenOn: boolean;
 }
 
 const HISTORY = 200;
@@ -160,14 +168,16 @@ let state: State = {
   message: null,
   libraryVersion: 0,
   genSettings: {
-    workers: Math.max(1, (navigator.hardwareConcurrency || 2) - 1),
+    workers: defaultWorkers(),
     seed: randomSeed(),
     maxStates: null,
-    maxRemoved: 3,
-    restartAfter: 30,
+    auto: true,
+    maxRemoved: 10,
+    restartAfter: 100,
     timeLimit: 0,
     targetLevel: 0,
     fillTarget: false,
+    keepAwake: true,
   },
   gen: null,
   genSelected: null,
@@ -175,10 +185,20 @@ let state: State = {
   genFilledOnly: false,
   genOnePerLevel: false,
   genByRating: false,
+  genScreenOn: false,
 };
 
 export function randomSeed(): number {
   return Math.floor(Math.random() * 1_000_000_000);
+}
+
+/**
+ * One generator worker per logical core but one; at most 4 on touch screens, where each worker's
+ * memory makes the browser more likely to discard the page in the background (SPEC §4.3).
+ */
+export function defaultWorkers(): number {
+  const workers = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
+  return matchMedia('(pointer: coarse)').matches ? Math.min(4, workers) : workers;
 }
 
 const listeners = new Set<() => void>();
@@ -242,23 +262,25 @@ function docChanged(): void {
 }
 
 /** The status of the current document, when the check is about its present fixed voxels. */
-export function currentStatus(s: State): Pick<EntryMeta, 'status' | 'levelString'> {
+export function currentStatus(s: State): Pick<EntryMeta, 'status' | 'levelString' | 'moves'> {
   const check = s.check;
   if ((check.kind === 'done' || check.kind === 'invalid') && check.signature === fixedSignature(s.doc)) {
-    if (check.kind === 'invalid') return { status: 'invalid', levelString: null };
-    return { status: check.result.status, levelString: check.result.solution?.level_string ?? null };
+    if (check.kind === 'invalid') return { status: 'invalid', levelString: null, moves: null };
+    const solution = check.result.solution;
+    return { status: check.result.status, levelString: solution?.level_string ?? null, moves: solution?.total_moves ?? null };
   }
-  return { status: null, levelString: null };
+  return { status: null, levelString: null, moves: null };
 }
 
 /** Stores the check result in the library entry of an unmodified document. */
 async function recordStatus(check: CheckState): Promise<void> {
   const { libraryId, dirty, doc } = state;
   if (!libraryId || dirty || !('signature' in check) || check.signature !== fixedSignature(doc)) return;
-  const entry = await getEntry(libraryId);
+  // Offline, a document never downloaded is not at hand: its status waits for another check.
+  const entry = await getEntry(libraryId).catch(() => undefined);
   if (!entry) return;
   const status = currentStatus(state);
-  if (entry.meta.status === status.status && entry.meta.levelString === status.levelString) return;
+  if (entry.meta.status === status.status && entry.meta.levelString === status.levelString && entry.meta.moves === status.moves) return;
   await putEntry({ ...entry, meta: { ...entry.meta, ...status } });
   setState((s) => ({ libraryVersion: s.libraryVersion + 1 }));
 }
@@ -366,19 +388,19 @@ export async function saveDoc(): Promise<void> {
   doc.meta.created ||= now;
   doc.meta.updated = now;
   const id = state.libraryId ?? newEntryId();
-  const existing = state.libraryId ? await getEntry(id) : undefined;
+  const existing = state.libraryId ? await getEntry(id).catch(() => undefined) : undefined;
   const meta: EntryMeta = {
     ...currentStatus(state),
     uniqueness: existing && uniquenessKey(existing.doc) === uniquenessKey(doc) ? existing.meta.uniqueness : null,
     created: existing?.meta.created ?? now,
     updated: now,
   };
-  await putEntry({ id, name: doc.name, doc, thumbnail: renderThumbnail(doc), meta });
+  const scope = await putEntry({ id, name: doc.name, doc, thumbnail: renderThumbnail(doc), meta });
   setState((s) => ({
     libraryId: id,
     dirty: false,
     doc: { ...s.doc, meta: { ...doc.meta } },
-    message: 'Saved to the library',
+    message: savedMessage(scope),
     libraryVersion: s.libraryVersion + 1,
   }));
 }
