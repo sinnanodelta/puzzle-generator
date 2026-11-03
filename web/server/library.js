@@ -65,6 +65,18 @@ export function createHandler({ blob, env }) {
     return { index, etag: result.blob.etag };
   }
 
+  async function readIndexForWrite() {
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      const current = await readIndex(null);
+      if (!current.etag) return current;
+      // Use Blob's metadata ETag for the conditional write, and ensure it describes this content.
+      const metadata = await blob.head(INDEX, { access: 'private' });
+      if (bare(metadata.etag) === bare(current.etag)) return { ...current, etag: metadata.etag };
+      if (attempt < ATTEMPTS) await sleep(50 + Math.random() * Math.min(800, 50 * 2 ** (attempt - 1)));
+    }
+    throw new IndexConflictError();
+  }
+
   async function getIndex(url) {
     const since = url.searchParams.get('since');
     const { index, etag } = await readIndex(since && ETAG.test(since) ? since : null);
@@ -129,7 +141,7 @@ export function createHandler({ blob, env }) {
 
     try {
       for (let attempt = 1; ; attempt++) {
-        const current = await readIndex(null);
+        const current = await readIndexForWrite();
         const { index, removed } = applyOps(current.index, ops, revs);
         let result;
         try {
