@@ -78,6 +78,7 @@ export interface LibraryState {
 }
 
 const API = '/api/library';
+const API_TIMEOUT = 15_000;
 const PASSWORD_KEY = 'puzzle-generator.library-password';
 const PLACE_KEY = 'puzzle-generator.library-place';
 /** The largest request body: the limit of Vercel Functions is 4.5 MB. */
@@ -108,6 +109,12 @@ function storedPassword(): string | null {
     return null;
   }
 }
+
+function timedOut(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'TimeoutError';
+}
+
+const timeoutNotice = `The shared library request timed out after ${API_TIMEOUT / 1000} seconds`;
 
 // --- State ---------------------------------------------------------------------------------------
 
@@ -211,6 +218,7 @@ function open(): Promise<IDBDatabase> {
       d.onversionchange = () => d.close();
       resolve(d);
     };
+    request.onblocked = () => reject(new Error('The library database is being upgraded in another tab. Close other app tabs and reload.'));
     request.onerror = () => reject(request.error);
   });
   return db;
@@ -411,13 +419,25 @@ async function refresh(): Promise<void> {
   if (local) set({ local });
   let res: Response;
   try {
-    res = await fetch(etag ? `${API}?since=${encodeURIComponent(etag)}` : API, { cache: 'no-store' });
-  } catch {
-    goOffline();
+    res = await fetch(etag ? `${API}?since=${encodeURIComponent(etag)}` : API, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+  } catch (e) {
+    goOffline(timedOut(e) ? timeoutNotice : undefined);
     return;
   }
   const isJson = res.headers.get('content-type')?.includes('application/json');
-  const body = isJson ? ((await res.json().catch(() => null)) as { etag: string | null; index?: LibraryIndex; unchanged?: boolean; error?: string } | null) : null;
+  let body: { etag: string | null; index?: LibraryIndex; unchanged?: boolean; error?: string } | null;
+  try {
+    body = isJson ? ((await res.json()) as typeof body) : null;
+  } catch (e) {
+    if (timedOut(e)) {
+      goOffline(timeoutNotice);
+      return;
+    }
+    body = null;
+  }
   if (!body || res.status === 404 || res.status === 503) {
     // A host without the API (the dev server answers with the page), or one not set up.
     set({
@@ -522,17 +542,28 @@ function post(ops: LibraryOp[], docs: Record<string, PuzzleDoc>): Promise<WriteA
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(password)}` },
           body: JSON.stringify({ base, ops, docs }),
+          signal: AbortSignal.timeout(API_TIMEOUT),
         });
-      } catch {
-        goOffline();
-        throw new LibraryError('Offline: the shared library cannot be changed', 'offline');
+      } catch (e) {
+        const message = timedOut(e) ? timeoutNotice : 'Offline: the shared library cannot be changed';
+        goOffline(message);
+        throw new LibraryError(message, 'offline');
       }
       if (res.status === 401) {
         if (stored !== null) lock();
         message = 'Wrong password. Try again:';
         continue;
       }
-      const body = (await res.json().catch(() => null)) as (WriteAnswer & { error?: string }) | null;
+      let body: (WriteAnswer & { error?: string }) | null;
+      try {
+        body = (await res.json()) as typeof body;
+      } catch (e) {
+        if (timedOut(e)) {
+          goOffline(timeoutNotice);
+          throw new LibraryError(timeoutNotice, 'offline');
+        }
+        body = null;
+      }
       // Not set up for changes (no LIBRARY_PASSWORD): saves stay on this device.
       if (res.status === 503) throw new LibraryError(body?.error ?? 'The shared library cannot be changed', 'offline');
       if (!res.ok || !body) throw new Error(body?.error ?? `the server answered ${res.status}`);

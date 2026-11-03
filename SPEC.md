@@ -419,9 +419,9 @@ puzzle_generator/
 
 ### 9.2 Deployment (Vercel) and PWA
 
-- **Import from GitHub as is.** Vercel reads `vercel.json` in the project's Root Directory: `vercel.json` at the repository root builds in `web/` and serves `web/dist`, and `web/vercel.json` does the same when the Root Directory is `web`. Both set the commands, so the dashboard's build settings don't matter. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
+- **Import from GitHub as is.** Vercel reads `vercel.json` in the project's Root Directory: `vercel.json` at the repository root builds in `web/` and serves `web/dist`, and `web/vercel.json` does the same when the Root Directory is `web`. The `/api/library` function is exposed from either root. Both configs set the commands, so the dashboard's build settings don't matter. Vercel has no Rust, so the WASM package `crates/puzzle-wasm/pkg` is committed: after a change to the Rust code, run `npm run wasm` and commit the package (`git add -f crates/puzzle-wasm/pkg`).
 - **Little traffic.** The built files in `assets/` have hashed names and are cached by browsers for a year. A service worker (`web/sw.js`, completed at build time with the list of built files) downloads each deployment once, then serves the app from its cache, offline too. A visit only fetches `sw.js` (~2 kB) to check for a new version, which takes over once every tab of the app is closed. The library API is never cached by the service worker.
-- **Shared library.** The function `web/api/library.js` is only deployed when the Root Directory is `web`. One-time setup in the Vercel dashboard:
+- **Shared library.** The function `web/api/library.js` (also exposed at the repository root for the root-directory deployment) uses a private Vercel Blob store. One-time setup in the Vercel dashboard:
   1. Storage → Create → Blob, access **Private**, connected to the project for Production (and Preview if wanted). This adds the store's environment variables: `BLOB_STORE_ID` (with OIDC) or `BLOB_READ_WRITE_TOKEN`.
   2. Settings → Environment Variables → add `LIBRARY_PASSWORD`.
   3. Redeploy.
