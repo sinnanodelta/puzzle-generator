@@ -100,7 +100,7 @@ The solver and the viewer only see fixed voxels plus the optional voxels the gen
   - `GET` returns `{etag, index}`. `GET ?since=<etag>` returns `{etag, unchanged: true}` when nothing changed.
   - `GET ?doc=<id>&rev=<rev>` returns a document. It never changes, so the browser caches it.
   - `POST {base, ops, docs}` with `Authorization: Bearer <password>` returns `{etag, revs}`, plus `index` only when another device changed the index after `base`. The operations are `put` (with its document), `meta` (results only), `move`, `delete`, `addFolder`, `moveFolder` and `deleteFolder`.
-  - The server reads the index and applies the operations, with the same code as the browser (`web/shared/library-index.js`). It writes the index only if it is unchanged (ETag condition), else it starts again. Concurrent changes are all kept; the last write wins per puzzle.
+  - The server reads the index and applies the operations, with the same code as the browser (`web/shared/library-index.js`). It writes the index only if it is unchanged (ETag condition), else it retries against the latest index up to eight times with backoff. Concurrent changes are all kept; the last write wins per puzzle. If the index keeps changing, it returns `409` so the client can retry instead of reporting an internal server error.
 - **Traffic.**
   - Opening the library sends one request: about 100 bytes when nothing changed.
   - A document is downloaded when it is first opened: once per revision per device.

@@ -22,7 +22,7 @@ import { applyOps, checkOps, emptyIndex, INDEX_FORMAT, isId } from '../shared/li
 const INDEX = 'library/index.json';
 const docPath = (id, rev) => `library/docs/${id}/${rev}.json`;
 const MAX_DOC = 2_000_000;
-const ATTEMPTS = 6;
+const ATTEMPTS = 8;
 /** ETag characters: printable ASCII without the double quote. */
 const ETAG = /^[!#-~]{1,200}$/;
 
@@ -39,6 +39,19 @@ const bare = (etag) => (etag ?? '').replace(/^W\//, '').replace(/^"(.*)"$/, '$1'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const digest = (text) => createHash('sha256').update(text).digest();
+
+function isPreconditionConflict(error, BlobPreconditionFailedError) {
+  return (
+    error instanceof BlobPreconditionFailedError ||
+    (error instanceof Error && error.message.includes('Precondition failed: ETag mismatch'))
+  );
+}
+
+class IndexConflictError extends Error {
+  constructor() {
+    super('The library changed while saving. Please try again.');
+  }
+}
 
 /** `blob`: the functions of @vercel/blob used here (or a test double); `env`: the environment. */
 export function createHandler({ blob, env }) {
@@ -128,9 +141,10 @@ export function createHandler({ blob, env }) {
             ...(current.etag ? { allowOverwrite: true, ifMatch: current.etag } : { allowOverwrite: false }),
           });
         } catch (e) {
-          const conflict = e instanceof blob.BlobPreconditionFailedError || !current.etag;
-          if (!conflict || attempt >= ATTEMPTS) throw e;
-          await sleep(Math.random() * 100 * attempt);
+          const conflict = isPreconditionConflict(e, blob.BlobPreconditionFailedError) || !current.etag;
+          if (!conflict) throw e;
+          if (attempt >= ATTEMPTS) throw new IndexConflictError();
+          await sleep(50 + Math.random() * Math.min(800, 50 * 2 ** (attempt - 1)));
           continue;
         }
         if (removed.length > 0) {
@@ -143,6 +157,7 @@ export function createHandler({ blob, env }) {
       }
     } catch (e) {
       await blob.del(written).catch(() => {});
+      if (e instanceof IndexConflictError) return json(409, { error: e.message });
       throw e;
     }
   }
