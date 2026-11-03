@@ -375,17 +375,29 @@ let loading: Promise<void> | null = null;
 /** Loads the library of this device and the copy of the shared index, then asks the server. */
 export function loadLibrary(): Promise<void> {
   loading ??= (async () => {
-    try {
-      const local = (await idbGet<LibraryIndex>(STATE, 'local')) ?? (await migrate());
-      const copy = await idbGet<SharedCopy>(STATE, 'shared');
-      if (copy) etag = copy.etag;
-      set({ local, shared: copy?.index ?? null, sharedAt: copy?.fetched ?? null });
-    } catch (e) {
-      console.warn('library: no local storage', e);
-    }
+    void loadCachedLibrary();
     await refreshLibrary();
   })();
   return loading;
+}
+
+async function loadCachedLibrary(): Promise<void> {
+  try {
+    const [storedLocal, copy] = await Promise.all([idbGet<LibraryIndex>(STATE, 'local'), idbGet<SharedCopy>(STATE, 'shared')]);
+    const local = storedLocal ?? (await migrate());
+    if (state.mode === 'loading') {
+      if (copy) etag = copy.etag;
+      set({ local, shared: copy?.index ?? null, sharedAt: copy?.fetched ?? null });
+    } else {
+      set({ local });
+      if (copy && state.shared === null) {
+        etag = copy.etag;
+        set({ shared: copy.index, sharedAt: copy.fetched });
+      }
+    }
+  } catch (e) {
+    console.warn('library: no local storage', e);
+  }
 }
 
 /** Loads the library the first time, then checks the server for changes. */
@@ -415,8 +427,11 @@ export function refreshLibrary(): Promise<void> {
 async function refresh(): Promise<void> {
   const version = sharedVersion;
   // Another tab may have changed the library of this device.
-  const local = await idbGet<LibraryIndex>(STATE, 'local').catch(() => undefined);
-  if (local) set({ local });
+  void idbGet<LibraryIndex>(STATE, 'local')
+    .then((local) => {
+      if (local) set({ local });
+    })
+    .catch((e) => console.warn('library: could not refresh local storage', e));
   let res: Response;
   try {
     res = await fetch(etag ? `${API}?since=${encodeURIComponent(etag)}` : API, {
